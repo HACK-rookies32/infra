@@ -127,12 +127,12 @@ resource "aws_instance" "web" {
     volume_type = local.root_volume.type
     encrypted   = local.root_volume.encrypted
   }
-  tags = { Name = "saferookids-web-${each.key}" }
+  tags = { Name = "kidhackapp-web-${each.key}" }
 }
 
 # External ALB
 resource "aws_lb" "ext_alb" {
-  name               = "saferookids-ext-alb"
+  name               = "kidhackapp-ext-alb"
   internal           = false
   load_balancer_type = "application"
   security_groups    = [aws_security_group.ext_alb_sg.id]
@@ -146,7 +146,7 @@ resource "aws_lb" "ext_alb" {
 }
 
 resource "aws_lb_target_group" "web_tg" {
-  name     = "saferookids-web-tg"
+  name     = "kidhackapp-web-tg"
   port     = 80
   protocol = "HTTP"
   vpc_id   = aws_vpc.main.id
@@ -258,12 +258,12 @@ resource "aws_instance" "was" {
     volume_type = local.root_volume.type
     encrypted   = local.root_volume.encrypted
   }
-  tags = { Name = "saferookids-was-${each.key}" }
+  tags = { Name = "kidhackapp-was-${each.key}" }
 }
 
 # Internal NLB
 resource "aws_lb" "int_nlb" {
-  name               = "saferookids-int-nlb"
+  name               = "kidhackapp-int-nlb"
   internal           = true
   load_balancer_type = "network"
   subnets            = [aws_subnet.web_private_2a.id, aws_subnet.web_private_2c.id]
@@ -273,7 +273,7 @@ resource "aws_lb" "int_nlb" {
 }
 
 resource "aws_lb_target_group" "was_tg" {
-  name     = "saferookids-was-tg"
+  name     = "kidhackapp-was-tg"
   port     = 8080
   protocol = "TCP"
   vpc_id   = aws_vpc.main.id

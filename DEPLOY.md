@@ -83,9 +83,9 @@ IAM 역할로 복호화해 가져옵니다. `user_data`에 넣지 않은 이유�
 
 | 파라미터 | 용도 |
 |---|---|
-| `/saferookids/rds/password` | Oracle 마스터 |
-| `/saferookids/docdb/password` | DocumentDB 마스터 |
-| `/saferookids/app/jwt-secret` | JWT 서명 키 (Terraform 자동 생성) |
+| `/kidhackapp/rds/password` | Oracle 마스터 |
+| `/kidhackapp/docdb/password` | DocumentDB 마스터 |
+| `/kidhackapp/app/jwt-secret` | JWT 서명 키 (Terraform 자동 생성) |
 
 ---
 
@@ -210,7 +210,7 @@ npm ci
 npm run build
 tar -czf dist.tar.gz dist      # ⚠️ dist/ 디렉터리가 한 겹 있어야 함
 
-aws s3 cp dist.tar.gz s3://saferookids-media-bucket-2026/artifacts/web/dist.tar.gz
+aws s3 cp dist.tar.gz s3://kidhackapp-media-bucket-2026/artifacts/web/dist.tar.gz
 ```
 
 > **tar 구조 주의**: 부팅 스크립트가 `--strip-components=1`로 풀기 때문에
@@ -234,7 +234,7 @@ kidhack-backend-0.0.1-SNAPSHOT-plain.jar   ← ❌ 클래스만 든 껍데기
 
 ```bash
 aws s3 cp build/libs/kidhack-backend-0.0.1-SNAPSHOT.jar \
-  s3://saferookids-media-bucket-2026/artifacts/was/kidhack-backend.jar
+  s3://kidhackapp-media-bucket-2026/artifacts/was/kidhack-backend.jar
 ```
 
 **파일명을 `kidhack-backend.jar`로 바꿔서** 올려야 합니다. 부팅 스크립트가 이 이름을
@@ -281,7 +281,7 @@ curl -I http://kidhackapp.com           # 301 → https
 
 # 타깃 헬스
 aws elbv2 describe-target-health --target-group-arn \
-  $(aws elbv2 describe-target-groups --names saferookids-was-tg \
+  $(aws elbv2 describe-target-groups --names kidhackapp-was-tg \
     --query "TargetGroups[0].TargetGroupArn" --output text)
 ```
 

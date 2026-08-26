@@ -10,14 +10,14 @@
 #       Parameter Store 표준 파라미터는 무료.
 
 resource "aws_ssm_parameter" "db_password" {
-  name        = "/saferookids/rds/password"
+  name        = "/kidhackapp/rds/password"
   description = "RDS Oracle master password"
   type        = "SecureString"
   value       = var.db_password
 }
 
 resource "aws_ssm_parameter" "docdb_password" {
-  name        = "/saferookids/docdb/password"
+  name        = "/kidhackapp/docdb/password"
   description = "DocumentDB master password"
   type        = "SecureString"
   value       = var.docdb_password
@@ -37,7 +37,7 @@ resource "random_password" "jwt_secret" {
 }
 
 resource "aws_ssm_parameter" "jwt_secret" {
-  name        = "/saferookids/app/jwt-secret"
+  name        = "/kidhackapp/app/jwt-secret"
   description = "JWT signing key for kidhack-backend"
   type        = "SecureString"
   value       = random_password.jwt_secret.result
@@ -50,7 +50,7 @@ resource "aws_ssm_parameter" "jwt_secret" {
 # DB 비밀번호와 같은 이유로 user_data 에 넣지 않는다 — user_data 는 인스턴스
 # 메타데이터로 평문 노출되기 때문이다.
 resource "aws_ssm_parameter" "dockerhub_token" {
-  name        = "/saferookids/dockerhub/token"
+  name        = "/kidhackapp/dockerhub/token"
   description = "Docker Hub PAT (read-only) for pulling the WEB image"
   type        = "SecureString"
   value       = var.dockerhub_token

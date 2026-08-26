@@ -3,7 +3,7 @@
 # ==========================================
 
 resource "aws_security_group" "ext_alb_sg" {
-  name   = "saferookids-ext-alb-sg"
+  name   = "kidhackapp-ext-alb-sg"
   vpc_id = aws_vpc.main.id
 
   ingress {
@@ -31,7 +31,7 @@ resource "aws_security_group" "ext_alb_sg" {
 }
 
 resource "aws_security_group" "web_sg" {
-  name   = "saferookids-web-sg"
+  name   = "kidhackapp-web-sg"
   vpc_id = aws_vpc.main.id
 
   ingress {
@@ -49,7 +49,7 @@ resource "aws_security_group" "web_sg" {
 }
 
 resource "aws_security_group" "was_sg" {
-  name   = "saferookids-was-sg"
+  name   = "kidhackapp-was-sg"
   vpc_id = aws_vpc.main.id
 
   ingress {
@@ -67,7 +67,7 @@ resource "aws_security_group" "was_sg" {
 }
 
 resource "aws_security_group" "redis_sg" {
-  name   = "saferookids-redis-sg"
+  name   = "kidhackapp-redis-sg"
   vpc_id = aws_vpc.main.id
 
   ingress {
@@ -85,7 +85,7 @@ resource "aws_security_group" "redis_sg" {
 }
 
 resource "aws_security_group" "docdb_sg" {
-  name   = "saferookids-docdb-sg"
+  name   = "kidhackapp-docdb-sg"
   vpc_id = aws_vpc.main.id
 
   ingress {
@@ -103,7 +103,7 @@ resource "aws_security_group" "docdb_sg" {
 }
 
 resource "aws_security_group" "rds_sg" {
-  name   = "saferookids-rds-sg"
+  name   = "kidhackapp-rds-sg"
   vpc_id = aws_vpc.main.id
 
   ingress {

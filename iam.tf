@@ -3,7 +3,7 @@
 # ==========================================
 
 resource "aws_iam_role" "ec2_role" {
-  name = "saferookids-ec2-role"
+  name = "kidhackapp-ec2-role"
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
@@ -21,7 +21,7 @@ resource "aws_iam_role_policy_attachment" "ssm_attach" {
 }
 
 resource "aws_iam_policy" "s3_access" {
-  name = "saferookids-s3-policy"
+  name = "kidhackapp-s3-policy"
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [{
@@ -48,7 +48,7 @@ resource "aws_iam_role_policy_attachment" "s3_attach" {
 # WAS 는 DB 비밀번호와 JWT 키를, WEB 은 Docker Hub 토큰을 읽는다.
 # 해당 파라미터 4 개로만 범위를 좁힌다.
 resource "aws_iam_policy" "ssm_params" {
-  name = "saferookids-ssm-params-policy"
+  name = "kidhackapp-ssm-params-policy"
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
@@ -84,6 +84,6 @@ resource "aws_iam_role_policy_attachment" "ssm_params_attach" {
 }
 
 resource "aws_iam_instance_profile" "ec2_profile" {
-  name = "saferookids-ec2-profile"
+  name = "kidhackapp-ec2-profile"
   role = aws_iam_role.ec2_role.name
 }
