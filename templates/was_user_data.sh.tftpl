@@ -1,0 +1,134 @@
+#!/bin/bash
+set -uxo pipefail
+exec > /var/log/user-data.log 2>&1
+
+export DEBIAN_FRONTEND=noninteractive
+apt-get update
+apt-get install -y openjdk-17-jre-headless awscli curl
+
+mkdir -p /opt/app/certs
+
+# ------------------------------------------------------------------
+# DocumentDB TLS 트러스트스토어
+#
+# DocumentDB 인증서는 Amazon RDS CA(프라이빗 CA)가 발급하므로 JDK 기본
+# cacerts 에 없다. 그렇다고 RDS 번들만 담은 새 트러스트스토어를 지정하면
+# 퍼블릭 CA 가 전부 사라져 ElastiCache TLS 접속이 깨진다.
+# → JDK 기본 cacerts 를 "복사"한 뒤 거기에 RDS CA 를 추가한다.
+#
+# 또한 global-bundle.pem 에는 인증서가 수십 개 들어 있는데 keytool 은
+# 첫 번째 것만 가져오므로, csplit 으로 쪼개 하나씩 넣어야 한다.
+# ------------------------------------------------------------------
+JAVA_BIN=$(readlink -f /usr/bin/java)
+JAVA_HOME_DIR=$(dirname "$(dirname "$JAVA_BIN")")
+cp "$JAVA_HOME_DIR/lib/security/cacerts" /opt/app/certs/truststore.jks
+chmod 644 /opt/app/certs/truststore.jks
+
+cd /tmp
+curl -sS -o global-bundle.pem https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem
+csplit -sz -f rds-cert- global-bundle.pem '/-BEGIN CERTIFICATE-/' '{*}'
+for CERT in rds-cert-*; do
+  keytool -importcert -noprompt -trustcacerts \
+    -alias "rds-$CERT" -file "$CERT" \
+    -keystore /opt/app/certs/truststore.jks -storepass changeit || true
+done
+
+# ------------------------------------------------------------------
+# 비밀번호는 user_data 에 넣지 않는다. user_data 는 인스턴스 메타데이터로
+# 노출되어 인스턴스 내 아무 프로세스나 평문으로 읽을 수 있기 때문에,
+# 부팅 시 SSM Parameter Store 에서 복호화해 가져온다.
+# ------------------------------------------------------------------
+DB_PASSWORD=$(aws ssm get-parameter --name "${db_password_param}" --with-decryption \
+  --region ${region} --query Parameter.Value --output text)
+DOCDB_PASSWORD=$(aws ssm get-parameter --name "${docdb_password_param}" --with-decryption \
+  --region ${region} --query Parameter.Value --output text)
+JWT_SECRET=$(aws ssm get-parameter --name "${jwt_secret_param}" --with-decryption \
+  --region ${region} --query Parameter.Value --output text)
+
+# ------------------------------------------------------------------
+# 환경변수로 application.yml 의 로컬 설정(H2 / localhost)을 덮어쓴다.
+# Spring Boot 의 relaxed binding 규칙에 따라
+# SPRING_DATASOURCE_URL -> spring.datasource.url 로 매핑된다.
+# (application-prod.yml 을 따로 만들면 이 블록은 줄일 수 있다)
+# ------------------------------------------------------------------
+cat > /opt/app/app.env <<EOF
+SERVER_PORT=8080
+
+# ALB -> Nginx -> NLB -> WAS 로 프록시가 2 단이다.
+# 이 값이 없으면 Spring 이 X-Forwarded-Proto 를 무시해서, ALB 에 HTTPS 를 켰을 때
+# 리다이렉트나 절대 URL 이 http:// 로 생성되어 무한 리다이렉트가 발생한다.
+SERVER_FORWARD_HEADERS_STRATEGY=framework
+
+# --- Oracle (NNE 로 전송 암호화, 드라이버가 자동 협상하므로 URL 변경 불필요) ---
+SPRING_DATASOURCE_URL=jdbc:oracle:thin:@//${oracle_endpoint}/${oracle_db_name}
+SPRING_DATASOURCE_USERNAME=${db_username}
+SPRING_DATASOURCE_PASSWORD=$DB_PASSWORD
+SPRING_DATASOURCE_DRIVER_CLASS_NAME=oracle.jdbc.OracleDriver
+SPRING_JPA_DATABASE_PLATFORM=org.hibernate.dialect.OracleDialect
+SPRING_H2_CONSOLE_ENABLED=false
+
+# --- DocumentDB ---
+# replicaSet=rs0  : DocumentDB 의 레플리카셋 이름은 항상 rs0 고정.
+#                   이걸 붙이면 드라이버가 토폴로지를 발견해 쓰기는 Writer,
+#                   읽기는 readPreference 대로 라우팅한다(페일오버 자동 추종).
+# retryWrites=false : DocumentDB 는 재시도 가능 쓰기를 지원하지 않는데
+#                     Java 드라이버는 기본으로 켜므로 반드시 꺼야 한다.
+SPRING_DATA_MONGODB_URI=mongodb://${docdb_username}:$DOCDB_PASSWORD@${docdb_endpoint}:27017/kidhack_chat?tls=true&replicaSet=rs0&readPreference=secondaryPreferred&retryWrites=false
+
+# --- JWT ---
+# application.yml 의 jwt.secret 을 덮어쓴다 (relaxed binding: JWT_SECRET -> jwt.secret).
+# 이게 없으면 공개된 로컬 테스트 키로 토큰을 서명하게 된다.
+JWT_SECRET=$JWT_SECRET
+
+# --- ElastiCache Redis (전송 암호화 켜져 있으므로 ssl 필수) ---
+SPRING_DATA_REDIS_HOST=${redis_endpoint}
+SPRING_DATA_REDIS_PORT=6379
+SPRING_DATA_REDIS_SSL_ENABLED=true
+
+# --- DocumentDB 인증서가 추가된 트러스트스토어 ---
+JAVA_TOOL_OPTIONS=-Djavax.net.ssl.trustStore=/opt/app/certs/truststore.jks -Djavax.net.ssl.trustStorePassword=changeit
+EOF
+
+chmod 600 /opt/app/app.env
+
+# ------------------------------------------------------------------
+# jar 를 서비스 시작 때마다 S3 에서 다시 받아온다.
+# user_data 는 최초 부팅 1 회만 실행되므로, 이 스크립트가 없으면 새 jar 를
+# 배포할 때마다 인스턴스를 재생성해야 한다.
+# 이걸 두면 재배포가 다음 한 줄로 끝난다:
+#   aws ssm start-session ... -> sudo systemctl restart kidhack
+# ------------------------------------------------------------------
+cat > /usr/local/bin/kidhack-fetch.sh <<'FETCH'
+#!/bin/bash
+set -euo pipefail
+aws s3 cp "s3://__BUCKET__/artifacts/was/kidhack-backend.jar" /opt/app/app.jar.new
+mv /opt/app/app.jar.new /opt/app/app.jar
+FETCH
+
+sed -i "s|__BUCKET__|${bucket}|g" /usr/local/bin/kidhack-fetch.sh
+chmod 755 /usr/local/bin/kidhack-fetch.sh
+
+cat > /etc/systemd/system/kidhack.service <<'UNIT'
+[Unit]
+Description=kidhack-backend
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=/opt/app/app.env
+# jar 가 아직 S3 에 없으면 여기서 실패하고 Restart 로 재시도한다.
+# 즉 인스턴스를 먼저 띄워두고 나중에 jar 를 올려도 알아서 기동된다.
+ExecStartPre=/usr/local/bin/kidhack-fetch.sh
+ExecStart=/usr/bin/java -jar /opt/app/app.jar
+Restart=always
+RestartSec=30
+SuccessExitStatus=143
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+
+systemctl daemon-reload
+systemctl enable kidhack
+systemctl start kidhack

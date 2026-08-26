@@ -1,0 +1,76 @@
+variable "aws_region" {
+  type    = string
+  default = "ap-northeast-2"
+}
+
+variable "vpc_cidr" {
+  type    = string
+  default = "192.168.0.0/16"
+}
+
+variable "s3_bucket_name" {
+  type    = string
+  default = "saferookids-media-bucket-2026"
+}
+
+variable "db_username" {
+  type    = string
+  default = "adminexample"
+}
+
+variable "db_password" {
+  type      = string
+  default   = "passexample1234!"
+  sensitive = true
+}
+
+# destroy 시 최종 스냅샷을 남길지 여부.
+#
+# false (기본, 점검/개발용)
+#   : 스냅샷 없이 빠르게 destroy 된다. destroy/apply 를 몇 번 반복해도 문제없다.
+# true (최종 제출/운영 전환 시)
+#   : destroy 전에 최종 스냅샷을 남긴다. 단 스냅샷 이름은 계정 내 유일해야 하므로,
+#     true 로 두고 destroy 를 두 번 하면 이름 충돌로 실패한다.
+#     그때는 기존 스냅샷을 지우거나 아래 리소스의 이름을 바꿀 것.
+#
+# 자동 백업(backup_retention_period)은 이 값과 무관하게 항상 켜져 있다.
+variable "keep_final_snapshot" {
+  type    = bool
+  default = false
+}
+
+# 서비스 도메인 (예: "careguard.shop"). 가비아 등에서 구매 후 여기에 넣는다.
+# 빈 문자열이면 Route 53 / ACM / 443 리스너가 아예 생성되지 않고 HTTP 80 만 뜬다.
+# 값을 주면 호스팅 존 -> 인증서 -> 검증 -> 443 리스너 -> Alias 레코드가
+# 한 번의 apply 로 전부 구성된다. 자세한 절차는 dns.tf 상단 주석 참고.
+variable "domain_name" {
+  type    = string
+  default = "team1domain.store"
+}
+
+# Oracle SID. WAS 의 JDBC URL 에도 이 값이 그대로 들어간다. 8자 이하.
+variable "oracle_db_name" {
+  type    = string
+  default = "ORCL"
+}
+
+# AMI 고정용.
+# 빈 문자열이면 최신 Ubuntu 22.04 를 조회하는데, Canonical 이 새 이미지를 내면
+# AMI ID 가 바뀌어 EC2 4 대가 전부 재생성된다. 시연/발표 전에는
+# `terraform output ubuntu_ami_id` 값을 여기에 박아 고정할 것.
+variable "ubuntu_ami_id" {
+  type    = string
+  default = ""
+}
+
+variable "docdb_username" {
+  type    = string
+  default = "docdbadmin"
+}
+
+# DocumentDB master password 제약: 8~100자, / " @ 사용 불가
+variable "docdb_password" {
+  type      = string
+  default   = "passexample1234!"
+  sensitive = true
+}

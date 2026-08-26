@@ -1,0 +1,123 @@
+#!/bin/bash
+set -uxo pipefail
+exec > /var/log/user-data.log 2>&1
+
+export DEBIAN_FRONTEND=noninteractive
+apt-get update
+apt-get install -y nginx awscli curl rsync
+
+mkdir -p /var/www/careguard
+
+# ALB 헬스체크가 즉시 통과하도록 임시 index 를 먼저 깔아둔다.
+# (dist 다운로드가 실패해도 인스턴스가 unhealthy 로 빠지지 않게 하기 위함)
+echo '<!doctype html><title>careguard</title><h1>bootstrapping</h1>' > /var/www/careguard/index.html
+
+# ------------------------------------------------------------------
+# dist 동기화 스크립트
+#
+# user_data 는 최초 부팅 1 회만 실행되므로, 이 스크립트가 없으면 프론트를
+# 다시 빌드할 때마다 인스턴스를 재생성해야 한다.
+# 이걸 두면 재배포가 다음 한 줄로 끝난다:
+#   sudo systemctl start careguard-sync
+#
+# 사전에 로컬에서 아래를 실행해 업로드해 두어야 한다:
+#   cd web && npm ci && npm run build
+#   tar -czf dist.tar.gz dist
+#   aws s3 cp dist.tar.gz s3://${bucket}/artifacts/web/dist.tar.gz
+# ------------------------------------------------------------------
+cat > /usr/local/bin/careguard-sync.sh <<'SYNC'
+#!/bin/bash
+set -euo pipefail
+TMP=$(mktemp -d)
+aws s3 cp "s3://__BUCKET__/artifacts/web/dist.tar.gz" "$TMP/dist.tar.gz"
+tar -xzf "$TMP/dist.tar.gz" -C "$TMP" --strip-components=1
+# 원자적 교체가 아니라 rsync 로 덮어쓴다. 정적 파일이라 이 정도면 충분하다.
+rsync -a --delete "$TMP/" /var/www/careguard/
+chown -R www-data:www-data /var/www/careguard
+rm -rf "$TMP"
+SYNC
+
+sed -i "s|__BUCKET__|${bucket}|g" /usr/local/bin/careguard-sync.sh
+chmod 755 /usr/local/bin/careguard-sync.sh
+
+cat > /etc/systemd/system/careguard-sync.service <<'UNIT'
+[Unit]
+Description=Sync careguard web dist from S3
+After=network-online.target
+Wants=network-online.target
+Before=nginx.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/bin/careguard-sync.sh
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+
+systemctl daemon-reload
+systemctl enable careguard-sync
+# dist 가 아직 S3 에 없으면 실패하지만, 위 임시 index 로 헬스체크는 통과한다.
+systemctl start careguard-sync || echo "WARN: dist.tar.gz 없음. 임시 index 로 기동한다."
+
+# ------------------------------------------------------------------
+# Nginx: 정적 SPA 서빙 + /api 를 내부 NLB 로 프록시
+#
+# 백엔드 컨트롤러가 이미 @RequestMapping("/api/...") 로 매핑되어 있고
+# context-path 도 없으므로, 경로를 그대로 넘긴다.
+# (변수를 쓰는 proxy_pass 는 URI 를 재작성하지 않는다)
+#
+# proxy_pass 에 호스트명을 직접 쓰면 Nginx 가 기동 시 1회만 DNS 를 조회하고
+# 결과를 영구 캐시한다. NLB 는 IP 가 바뀔 수 있으므로 변수 + resolver 를 써서
+# 매 요청마다 재조회하게 한다. 169.254.169.253 은 VPC 제공 DNS.
+# ------------------------------------------------------------------
+cat > /etc/nginx/sites-available/careguard <<'NGINXCONF'
+# ALB 가 TLS 를 종단하고 Nginx 로는 HTTP 로 넘어온다. 따라서 여기서
+# X-Forwarded-Proto 를 $scheme 으로 세팅하면 항상 "http" 가 되어,
+# ALB 가 보낸 "https" 를 덮어써 버린다. -> 원본이 있으면 그대로 보존한다.
+map $http_x_forwarded_proto $fwd_proto {
+    default $http_x_forwarded_proto;
+    ""      $scheme;
+}
+
+server {
+    listen 80 default_server;
+    server_name _;
+
+    root /var/www/careguard;
+    index index.html;
+
+    # react-router-dom 사용. 이 폴백이 없으면 /members 등에서 새로고침 시 404.
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+
+    location /api/ {
+        resolver 169.254.169.253 valid=10s;
+        set $was_upstream "NLB_DNS_PLACEHOLDER";
+        proxy_pass http://$was_upstream:8080;
+
+        proxy_http_version 1.1;
+        proxy_set_header Host              $host;
+        proxy_set_header X-Real-IP         $remote_addr;
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $fwd_proto;
+
+        # WebSocket(채팅) 통과용. 없으면 STOMP/SockJS 핸드셰이크가 실패한다.
+        proxy_set_header Upgrade    $http_upgrade;
+        proxy_set_header Connection "upgrade";
+
+        proxy_read_timeout 300s;
+    }
+}
+NGINXCONF
+
+# 위 heredoc 은 따옴표로 감싸 bash 변수($uri 등) 확장을 막았으므로,
+# NLB 주소는 여기서 치환한다.
+sed -i "s|NLB_DNS_PLACEHOLDER|${nlb_dns}|g" /etc/nginx/sites-available/careguard
+
+rm -f /etc/nginx/sites-enabled/default
+ln -sf /etc/nginx/sites-available/careguard /etc/nginx/sites-enabled/careguard
+
+nginx -t && systemctl enable nginx && systemctl restart nginx
