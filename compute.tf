@@ -40,6 +40,28 @@ locals {
     http_put_response_hop_limit = 1
   }
 
+  # 루트 볼륨 설정. imds_v2 와 마찬가지로 EC2 4 대가 같은 값을 쓰므로 여기서 정의한다.
+  #
+  # encrypted = true : RDS(storage_encrypted) / DocumentDB / S3(SSE) 에 이미 적용한
+  #   저장 암호화 기준을 EC2 에도 맞춘 것이다. WAS 의 /opt/app/app.env 에는 DB 비밀번호와
+  #   JWT 서명 키가 들어 있고, 그게 얹혀 있는 디스크다.
+  #
+  #   kms_key_id 를 지정하지 않으면 AWS 관리형 키(aws/ebs)를 쓴다 → 키 비용 없음.
+  #   t3 는 Nitro 기반이라 암복호화가 하드웨어로 오프로드되어 성능 차이는 없다.
+  #
+  #   방어 범위를 오해하지 말 것: 인스턴스 안에서 파일을 읽는 것은 그대로 가능하다.
+  #   이 설정이 막는 것은 스냅샷/AMI 가 계정 밖으로 나가는 경로다.
+  #   (aws/ebs 키로 암호화된 스냅샷은 타 계정 공유·퍼블릭 공유가 API 레벨에서 불가)
+  #
+  #   ⚠️ EBS 암호화는 볼륨 "생성 시점" 에만 결정된다. 기존 볼륨을 암호화로 전환하는
+  #   API 가 존재하지 않으므로, 이 값을 바꾸면 EC2 4 대가 전부 재생성된다.
+  #   database.tf 의 storage_encrypted 주석과 정확히 같은 제약이다.
+  root_volume = {
+    size      = 30
+    type      = "gp3"
+    encrypted = true
+  }
+
   web_user_data = templatefile("${path.module}/templates/web_user_data.sh.tftpl", {
     bucket  = aws_s3_bucket.media.id
     nlb_dns = aws_lb.int_nlb.dns_name
@@ -78,9 +100,11 @@ resource "aws_instance" "web_1" {
     http_put_response_hop_limit = local.imds_v2.http_put_response_hop_limit
   }
 
+  # 루트 볼륨 암호화 (locals.root_volume 주석 참고)
   root_block_device {
-    volume_size = 30
-    volume_type = "gp3"
+    volume_size = local.root_volume.size
+    volume_type = local.root_volume.type
+    encrypted   = local.root_volume.encrypted
   }
   tags = { Name = "saferookids-web-1" }
 }
@@ -102,9 +126,11 @@ resource "aws_instance" "web_2" {
     http_put_response_hop_limit = local.imds_v2.http_put_response_hop_limit
   }
 
+  # 루트 볼륨 암호화 (locals.root_volume 주석 참고)
   root_block_device {
-    volume_size = 30
-    volume_type = "gp3"
+    volume_size = local.root_volume.size
+    volume_type = local.root_volume.type
+    encrypted   = local.root_volume.encrypted
   }
   tags = { Name = "saferookids-web-2" }
 }
@@ -229,9 +255,11 @@ resource "aws_instance" "was_1" {
     http_put_response_hop_limit = local.imds_v2.http_put_response_hop_limit
   }
 
+  # 루트 볼륨 암호화 (locals.root_volume 주석 참고)
   root_block_device {
-    volume_size = 30
-    volume_type = "gp3"
+    volume_size = local.root_volume.size
+    volume_type = local.root_volume.type
+    encrypted   = local.root_volume.encrypted
   }
   tags = { Name = "saferookids-was-1" }
 }
@@ -253,9 +281,11 @@ resource "aws_instance" "was_2" {
     http_put_response_hop_limit = local.imds_v2.http_put_response_hop_limit
   }
 
+  # 루트 볼륨 암호화 (locals.root_volume 주석 참고)
   root_block_device {
-    volume_size = 30
-    volume_type = "gp3"
+    volume_size = local.root_volume.size
+    volume_type = local.root_volume.type
+    encrypted   = local.root_volume.encrypted
   }
   tags = { Name = "saferookids-was-2" }
 }
