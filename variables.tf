@@ -18,9 +18,20 @@ variable "db_username" {
   default = "adminexample"
 }
 
+# RDS Oracle 마스터 비밀번호.
+#
+# default 를 두지 않는다. 기본값을 넣으면 그 값이 코드에 평문으로 남아 그대로
+# 커밋되고, 리포지토리를 읽을 수 있는 사람 전부가 운영 DB 비밀번호를 알게 된다.
+# default 가 없으면 값을 주지 않았을 때 terraform 이 plan 단계에서 멈추므로,
+# "설정을 깜빡한 채 배포되는" 경로 자체가 사라진다.
+#
+# 값은 환경변수로 주입한다. tfvars 파일은 실수로 커밋될 여지가 있어 쓰지 않는다.
+#   로컬 : export TF_VAR_db_password='...'
+#   CI   : GitHub Secrets -> env: TF_VAR_db_password: ${{ secrets.DB_PASSWORD }}
+#
+# 제약: 8~128 자, / " @ 와 공백 사용 불가 (RDS Oracle).
 variable "db_password" {
   type      = string
-  default   = "passexample1234!"
   sensitive = true
 }
 
@@ -73,9 +84,12 @@ variable "docdb_username" {
   default = "docdbadmin"
 }
 
-# DocumentDB master password 제약: 8~100자, / " @ 사용 불가
+# DocumentDB 마스터 비밀번호. default 를 두지 않는 이유는 db_password 주석 참고.
+#   로컬 : export TF_VAR_docdb_password='...'
+#   CI   : GitHub Secrets -> env: TF_VAR_docdb_password: ${{ secrets.DOCDB_PASSWORD }}
+#
+# 제약: 8~100 자, / " @ 사용 불가 (DocumentDB).
 variable "docdb_password" {
   type      = string
-  default   = "passexample1234!"
   sensitive = true
 }

@@ -1,6 +1,13 @@
 .terraform/
 *.tfstate
 *.tfstate.*
+
+# 플랜 파일. tfstate 와 동일하게 취급해야 한다.
+# `terraform plan -out` 산출물은 zip 이며 그 안에 tfstate 사본과 변수 값이
+# 평문으로 들어 있다. 확장자가 없어서 *.tfstate 패턴에 걸리지 않으므로 따로 적는다.
+tfplan
+*.tfplan
+plan.out
 crash.log
 crash.*.log
 *.tfvars
