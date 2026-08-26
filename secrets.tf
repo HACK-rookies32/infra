@@ -42,3 +42,16 @@ resource "aws_ssm_parameter" "jwt_secret" {
   type        = "SecureString"
   value       = random_password.jwt_secret.result
 }
+
+# Docker Hub Personal Access Token (read-only).
+# WEB 이 부팅 시 이걸로 docker login 한 뒤 이미지를 pull 하고, Watchtower 도
+# 같은 자격증명(/root/.docker/config.json)으로 폴링한다.
+#
+# DB 비밀번호와 같은 이유로 user_data 에 넣지 않는다 — user_data 는 인스턴스
+# 메타데이터로 평문 노출되기 때문이다.
+resource "aws_ssm_parameter" "dockerhub_token" {
+  name        = "/saferookids/dockerhub/token"
+  description = "Docker Hub PAT (read-only) for pulling the WEB image"
+  type        = "SecureString"
+  value       = var.dockerhub_token
+}

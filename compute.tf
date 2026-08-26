@@ -75,9 +75,15 @@ locals {
     "2" = aws_subnet.was_private_2c.id
   }
 
+  # WEB 은 S3 에서 dist 를 받지 않는다. Docker Hub 이미지를 받아 컨테이너로 뜨고,
+  # 이후 갱신은 Watchtower 가 처리한다 (templates/web_user_data.sh.tftpl 참고).
   web_user_data = templatefile("${path.module}/templates/web_user_data.sh.tftpl", {
-    bucket  = aws_s3_bucket.media.id
-    nlb_dns = aws_lb.int_nlb.dns_name
+    region                   = var.aws_region
+    nlb_dns                  = aws_lb.int_nlb.dns_name
+    dockerhub_image          = var.dockerhub_image
+    dockerhub_username       = var.dockerhub_username
+    dockerhub_token_param    = aws_ssm_parameter.dockerhub_token.name
+    watchtower_poll_interval = var.watchtower_poll_interval
   })
 
   was_user_data = templatefile("${path.module}/templates/was_user_data.sh.tftpl", {
@@ -145,10 +151,14 @@ resource "aws_lb_target_group" "web_tg" {
   protocol = "HTTP"
   vpc_id   = aws_vpc.main.id
 
+  # 헬스체크는 SPA 폴백을 타지 않는 전용 경로를 쓴다.
+  # "/" 로 두면 index.html 전체를 반환해 불필요하게 무겁고, dist 가 깨져도
+  # try_files 폴백 때문에 200 이 나올 수 있어 신호가 흐려진다.
+  # 이 경로는 이미지의 nginx 설정(web/nginx/default.conf.template)에 정의되어 있다.
   health_check {
-    path                = "/"
+    path                = "/healthz"
     protocol            = "HTTP"
-    matcher             = "200-399"
+    matcher             = "200"
     interval            = 30
     healthy_threshold   = 3
     unhealthy_threshold = 3

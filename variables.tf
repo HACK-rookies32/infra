@@ -79,6 +79,56 @@ variable "ubuntu_ami_id" {
   default = ""
 }
 
+# ------------------------------------------------------------------
+# Docker Hub (WEB CI/CD)
+# ------------------------------------------------------------------
+
+# WEB 이미지 경로. "<사용자명>/<저장소명>" 형식.
+# GitHub Actions 가 여기에 :latest 를 밀고, Watchtower 가 이걸 폴링한다.
+# 워크플로의 IMAGE 값과 반드시 일치해야 한다. 어긋나면 CI 는 성공하는데
+# 배포만 조용히 안 되고, 아무 에러도 나지 않는다.
+variable "dockerhub_image" {
+  type    = string
+  default = "bulletbear/kidhack-web"
+}
+
+variable "dockerhub_username" {
+  type    = string
+  default = "bulletbear"
+}
+
+# Docker Hub Personal Access Token.
+#
+# default 를 두지 않는 이유는 db_password 주석과 같다.
+#   로컬 : export TF_VAR_dockerhub_token='dckr_pat_...'
+#   CI   : GitHub Secrets -> env: TF_VAR_dockerhub_token: ${{ secrets.DOCKERHUB_PULL_TOKEN }}
+#
+# ⚠️ Read-only 권한으로 발급할 것.
+#   EC2 는 pull 만 하면 되고 push 는 GitHub Actions 의 역할이다.
+#   여기에 쓰기 권한을 주면 인스턴스가 뚫렸을 때 이미지를 덮어쓸 수 있게 된다.
+#   즉 GitHub 에 넣는 토큰(Read & Write)과 반드시 다른 토큰이어야 한다.
+#
+# 대상 저장소가 private 이므로 이 값 없이는 WEB 이 이미지를 받지 못한다.
+variable "dockerhub_token" {
+  type      = string
+  sensitive = true
+}
+
+# Watchtower 가 Docker Hub 를 확인하는 주기(초).
+#
+# ⚠️ 짧게 두면 Docker Hub rate limit 에 걸린다.
+#   Watchtower 는 폴링마다 매니페스트를 조회하고 Docker Hub 는 이를 pull 로
+#   계산한다. WEB 2 대가 각자 폴링하므로 요청량은 두 배다.
+#     60 초  -> 시간당 120 회 (무료 계정 한도 초과)
+#     300 초 -> 시간당 24 회  (안전)
+#   push 후 최대 5 분 안에 반영된다. 더 빠르게 하려면 유료 플랜이 필요하다.
+#
+#   한도는 Docker 정책에 따라 바뀌므로 배포 전 현재 값을 확인할 것.
+variable "watchtower_poll_interval" {
+  type    = number
+  default = 300
+}
+
 variable "docdb_username" {
   type    = string
   default = "docdbadmin"

@@ -44,8 +44,9 @@ resource "aws_iam_role_policy_attachment" "s3_attach" {
   policy_arn = aws_iam_policy.s3_access.arn
 }
 
-# WAS 가 부팅 시 DB 비밀번호를 SSM Parameter Store 에서 읽어가기 위한 권한.
-# 해당 파라미터 2 개로만 범위를 좁힌다.
+# EC2 가 부팅 시 비밀 값을 SSM Parameter Store 에서 읽어가기 위한 권한.
+# WAS 는 DB 비밀번호와 JWT 키를, WEB 은 Docker Hub 토큰을 읽는다.
+# 해당 파라미터 4 개로만 범위를 좁힌다.
 resource "aws_iam_policy" "ssm_params" {
   name = "saferookids-ssm-params-policy"
   policy = jsonencode({
@@ -57,7 +58,8 @@ resource "aws_iam_policy" "ssm_params" {
         Resource = [
           aws_ssm_parameter.db_password.arn,
           aws_ssm_parameter.docdb_password.arn,
-          aws_ssm_parameter.jwt_secret.arn
+          aws_ssm_parameter.jwt_secret.arn,
+          aws_ssm_parameter.dockerhub_token.arn
         ]
       },
       {
