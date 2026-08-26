@@ -62,6 +62,19 @@ locals {
     encrypted = true
   }
 
+  # EC2 는 티어 안에서 AZ(서브넷)만 다르고 나머지 설정이 전부 같다.
+  # 여기에 AZ 를 나열해 두고 아래 aws_instance 가 for_each 로 펼친다.
+  # AZ 를 늘리거나 줄일 때 이 맵만 고치면 인스턴스와 타깃그룹 등록이 함께 따라온다.
+  web_subnets = {
+    "1" = aws_subnet.web_private_2a.id
+    "2" = aws_subnet.web_private_2c.id
+  }
+
+  was_subnets = {
+    "1" = aws_subnet.was_private_2a.id
+    "2" = aws_subnet.was_private_2c.id
+  }
+
   web_user_data = templatefile("${path.module}/templates/web_user_data.sh.tftpl", {
     bucket  = aws_s3_bucket.media.id
     nlb_dns = aws_lb.int_nlb.dns_name
@@ -82,11 +95,13 @@ locals {
   })
 }
 
-# WEB EC2 (2a, 2c)
-resource "aws_instance" "web_1" {
+# WEB EC2 (2a, 2c) — locals.web_subnets 의 키마다 한 대씩 생성된다.
+resource "aws_instance" "web" {
+  for_each = local.web_subnets
+
   ami                    = local.ubuntu_ami
   instance_type          = "t3.small"
-  subnet_id              = aws_subnet.web_private_2a.id
+  subnet_id              = each.value
   vpc_security_group_ids = [aws_security_group.web_sg.id]
   iam_instance_profile   = aws_iam_instance_profile.ec2_profile.name
 
@@ -106,33 +121,7 @@ resource "aws_instance" "web_1" {
     volume_type = local.root_volume.type
     encrypted   = local.root_volume.encrypted
   }
-  tags = { Name = "saferookids-web-1" }
-}
-
-resource "aws_instance" "web_2" {
-  ami                    = local.ubuntu_ami
-  instance_type          = "t3.small"
-  subnet_id              = aws_subnet.web_private_2c.id
-  vpc_security_group_ids = [aws_security_group.web_sg.id]
-  iam_instance_profile   = aws_iam_instance_profile.ec2_profile.name
-
-  user_data                   = local.web_user_data
-  user_data_replace_on_change = true
-
-  # IMDSv2 강제 (locals.imds_v2 주석 참고)
-  metadata_options {
-    http_endpoint               = local.imds_v2.http_endpoint
-    http_tokens                 = local.imds_v2.http_tokens
-    http_put_response_hop_limit = local.imds_v2.http_put_response_hop_limit
-  }
-
-  # 루트 볼륨 암호화 (locals.root_volume 주석 참고)
-  root_block_device {
-    volume_size = local.root_volume.size
-    volume_type = local.root_volume.type
-    encrypted   = local.root_volume.encrypted
-  }
-  tags = { Name = "saferookids-web-2" }
+  tags = { Name = "saferookids-web-${each.key}" }
 }
 
 # External ALB
@@ -166,15 +155,11 @@ resource "aws_lb_target_group" "web_tg" {
   }
 }
 
-resource "aws_lb_target_group_attachment" "web_1" {
-  target_group_arn = aws_lb_target_group.web_tg.arn
-  target_id        = aws_instance.web_1.id
-  port             = 80
-}
+resource "aws_lb_target_group_attachment" "web" {
+  for_each = aws_instance.web
 
-resource "aws_lb_target_group_attachment" "web_2" {
   target_group_arn = aws_lb_target_group.web_tg.arn
-  target_id        = aws_instance.web_2.id
+  target_id        = each.value.id
   port             = 80
 }
 
@@ -237,11 +222,13 @@ resource "aws_lb_listener" "https" {
   }
 }
 
-# WAS EC2 (2a, 2c)
-resource "aws_instance" "was_1" {
+# WAS EC2 (2a, 2c) — locals.was_subnets 의 키마다 한 대씩 생성된다.
+resource "aws_instance" "was" {
+  for_each = local.was_subnets
+
   ami                    = local.ubuntu_ami
   instance_type          = "t3.medium"
-  subnet_id              = aws_subnet.was_private_2a.id
+  subnet_id              = each.value
   vpc_security_group_ids = [aws_security_group.was_sg.id]
   iam_instance_profile   = aws_iam_instance_profile.ec2_profile.name
 
@@ -261,33 +248,7 @@ resource "aws_instance" "was_1" {
     volume_type = local.root_volume.type
     encrypted   = local.root_volume.encrypted
   }
-  tags = { Name = "saferookids-was-1" }
-}
-
-resource "aws_instance" "was_2" {
-  ami                    = local.ubuntu_ami
-  instance_type          = "t3.medium"
-  subnet_id              = aws_subnet.was_private_2c.id
-  vpc_security_group_ids = [aws_security_group.was_sg.id]
-  iam_instance_profile   = aws_iam_instance_profile.ec2_profile.name
-
-  user_data                   = local.was_user_data
-  user_data_replace_on_change = true
-
-  # IMDSv2 강제 (locals.imds_v2 주석 참고)
-  metadata_options {
-    http_endpoint               = local.imds_v2.http_endpoint
-    http_tokens                 = local.imds_v2.http_tokens
-    http_put_response_hop_limit = local.imds_v2.http_put_response_hop_limit
-  }
-
-  # 루트 볼륨 암호화 (locals.root_volume 주석 참고)
-  root_block_device {
-    volume_size = local.root_volume.size
-    volume_type = local.root_volume.type
-    encrypted   = local.root_volume.encrypted
-  }
-  tags = { Name = "saferookids-was-2" }
+  tags = { Name = "saferookids-was-${each.key}" }
 }
 
 # Internal NLB
@@ -313,15 +274,11 @@ resource "aws_lb_target_group" "was_tg" {
   }
 }
 
-resource "aws_lb_target_group_attachment" "was_1" {
-  target_group_arn = aws_lb_target_group.was_tg.arn
-  target_id        = aws_instance.was_1.id
-  port             = 8080
-}
+resource "aws_lb_target_group_attachment" "was" {
+  for_each = aws_instance.was
 
-resource "aws_lb_target_group_attachment" "was_2" {
   target_group_arn = aws_lb_target_group.was_tg.arn
-  target_id        = aws_instance.was_2.id
+  target_id        = each.value.id
   port             = 8080
 }
 
@@ -334,4 +291,54 @@ resource "aws_lb_listener" "nlb_tcp" {
     type             = "forward"
     target_group_arn = aws_lb_target_group.was_tg.arn
   }
+}
+
+# ------------------------------------------------------------------
+# 주소 이관 (web_1 → web["1"] 등)
+#
+# for_each 로 접으면서 리소스 주소가 바뀌었다. moved 블록이 없으면 이미
+# apply 한 환경에서 Terraform 이 "옛 주소 destroy + 새 주소 create" 로 읽어
+# EC2 4 대를 통째로 재생성한다.
+#
+# state 에 옛 주소가 없으면 아무 일도 하지 않으므로(no-op) 그냥 둬도 무해하다.
+# 팀원 전원이 한 번씩 apply 를 돌린 뒤에는 지워도 된다.
+# ------------------------------------------------------------------
+moved {
+  from = aws_instance.web_1
+  to   = aws_instance.web["1"]
+}
+
+moved {
+  from = aws_instance.web_2
+  to   = aws_instance.web["2"]
+}
+
+moved {
+  from = aws_instance.was_1
+  to   = aws_instance.was["1"]
+}
+
+moved {
+  from = aws_instance.was_2
+  to   = aws_instance.was["2"]
+}
+
+moved {
+  from = aws_lb_target_group_attachment.web_1
+  to   = aws_lb_target_group_attachment.web["1"]
+}
+
+moved {
+  from = aws_lb_target_group_attachment.web_2
+  to   = aws_lb_target_group_attachment.web["2"]
+}
+
+moved {
+  from = aws_lb_target_group_attachment.was_1
+  to   = aws_lb_target_group_attachment.was["1"]
+}
+
+moved {
+  from = aws_lb_target_group_attachment.was_2
+  to   = aws_lb_target_group_attachment.was["2"]
 }
