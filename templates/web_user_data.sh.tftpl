@@ -117,6 +117,16 @@ fi
 #   "템플릿" 만 넣고, 컨테이너가 뜰 때 envsubst 로 주소를 채운다.
 #   (nginx 공식 이미지가 /etc/nginx/templates/*.template 를 자동 처리한다)
 #
+# DNS_RESOLVER 를 함께 넘기는 이유:
+#   nginx 가 proxy_pass 에 호스트명을 직접 쓰면 기동 시 1 회만 DNS 를 조회하고
+#   결과를 영구 캐시한다. NLB 는 IP 가 바뀔 수 있어 변수 + resolver 로 매번
+#   재조회하게 해야 하는데, 그러려면 resolver 주소를 명시해야 한다.
+#
+#   ⚠️ 링크로컬 주소(169.254.169.253)를 쓰면 안 된다.
+#     호스트에서는 동작하지만 컨테이너의 브리지 네트워크에서는 라우팅되지 않는다.
+#     VPC DNS 는 "VPC 대역 + 2" 에도 같은 서비스를 제공하고 이쪽은 일반
+#     라우팅되는 주소라 컨테이너에서도 닿는다. compute.tf 가 cidrhost 로 계산해 넘긴다.
+#
 # watchtower 라벨이 붙은 컨테이너만 갱신 대상이 된다.
 # ------------------------------------------------------------------
 cat > /etc/systemd/system/careguard-web.service <<UNIT
@@ -135,6 +145,7 @@ ExecStart=/usr/bin/docker run -d \\
   --restart unless-stopped \\
   -p 80:80 \\
   -e NLB_DNS=${nlb_dns} \\
+  -e DNS_RESOLVER=${dns_resolver} \\
   -l com.centurylinklabs.watchtower.enable=true \\
   ${dockerhub_image}:latest
 Restart=on-failure
