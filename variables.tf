@@ -29,7 +29,14 @@ variable "db_username" {
 #   로컬 : export TF_VAR_db_password='...'
 #   CI   : GitHub Secrets -> env: TF_VAR_db_password: ${{ secrets.DB_PASSWORD }}
 #
-# 제약: 8~128 자, / " @ 와 공백 사용 불가 (RDS Oracle).
+# 제약: 8~30 자. / " @ & ' 와 공백 사용 불가.
+#
+# ⚠️ 길이 상한이 다른 엔진(PostgreSQL 등 128 자)보다 훨씬 짧다. RDS Oracle 만
+#    8~30 자다. 또 Oracle 은 & 와 작은따옴표까지 추가로 막는다.
+#    이 값은 /opt/app/app.env 에도 그대로 들어가는데, & 는 거기서도 위험하다
+#    (SPRING_DATA_MONGODB_URI 의 쿼리스트링 구분자와 같은 문자다).
+#
+# 영숫자 + ! # $ % ^ * ( ) - _ = + 범위로 20 자 내외면 두 DB 모두 안전하다.
 variable "db_password" {
   type      = string
   sensitive = true
@@ -80,7 +87,7 @@ variable "ubuntu_ami_id" {
 }
 
 # ------------------------------------------------------------------
-# Docker Hub (WEB CI/CD)
+# Docker Hub (WEB / WAS CI/CD)
 # ------------------------------------------------------------------
 
 # WEB 이미지 경로. "<사용자명>/<저장소명>" 형식.
@@ -92,9 +99,35 @@ variable "dockerhub_image" {
   default = "bulletbear/kidhack-web"
 }
 
+# WAS(백엔드) 이미지 경로. 위와 같은 규칙이다.
+# backend 레포 .github/workflows/cd.yml 의 IMAGE 값과 일치해야 한다.
+variable "was_image" {
+  type    = string
+  default = "jotriever/kidhack-was"
+}
+
+# ------------------------------------------------------------------
+# Docker Hub 계정이 티어별로 다르다.
+#
+#   WEB : bulletbear/kidhack-web
+#   WAS : jotriever/kidhack-was
+#
+# 두 개인 계정이고 조직(org)이 아니므로, 한쪽 자격증명으로 다른 쪽 private
+# 저장소를 받을 수 없다. docker login 은 레지스트리(docker.io)당 한 계정만
+# 유지되므로 한 인스턴스가 두 계정을 동시에 쓰는 것도 불가능하다.
+#
+# 다행히 WEB 과 WAS 는 서로 다른 EC2 라 충돌하지 않는다. 각 티어가 자기
+# 계정으로 로그인하도록 사용자명과 토큰을 티어별로 나눠 둔다.
+# ------------------------------------------------------------------
+
 variable "dockerhub_username" {
   type    = string
   default = "bulletbear"
+}
+
+variable "was_dockerhub_username" {
+  type    = string
+  default = "jotriever"
 }
 
 # Docker Hub Personal Access Token.
@@ -114,6 +147,39 @@ variable "dockerhub_token" {
   sensitive = true
 }
 
+# WAS 용 Docker Hub PAT. 위 dockerhub_token 과 계정이 다르므로 별도 값이다.
+# 주의사항은 위와 동일하다 — Read-only 로 발급하고, backend 레포 GitHub
+# Secrets 에 넣는 Read & Write 토큰과 반드시 다른 토큰이어야 한다.
+#
+#   로컬 : export TF_VAR_was_dockerhub_token='dckr_pat_...'
+#   CI   : GitHub Secrets -> env: TF_VAR_was_dockerhub_token: ${{ secrets.WAS_DOCKERHUB_PULL_TOKEN }}
+#
+# 이 값 없이는 WAS 가 이미지를 받지 못하고 systemd 가 30 초마다 재시도만 한다.
+variable "was_dockerhub_token" {
+  type      = string
+  sensitive = true
+}
+
+# Watchtower 이미지.
+#
+# ⚠️ containrrr/watchtower 를 쓰면 안 된다.
+#   원본은 유지보수가 중단되어 Docker API 1.25 클라이언트로 고정되어 있는데,
+#   Docker Engine 29 부터 최소 지원 API 가 1.40 으로 올라가면서 아예 통신이
+#   되지 않는다. 컨테이너가 이 오류로 재시작만 반복한다:
+#     "client version 1.25 is too old. Minimum supported API version is 1.40"
+#   원본에는 이 문제를 고칠 패치가 나오지 않는다.
+#
+#   nickfedor/watchtower 는 활발히 유지보수되는 포크이며, 설정 환경변수와
+#   컨테이너 라벨(com.centurylinklabs.watchtower.enable)이 원본과 동일해서
+#   이미지 이름만 바꾸면 된다.
+#
+# 태그를 고정하는 이유: latest 로 두면 포크가 갱신될 때 또 조용히 깨질 수 있다.
+# 올릴 때는 이 값을 명시적으로 올린다.
+variable "watchtower_image" {
+  type    = string
+  default = "nickfedor/watchtower:1.21.2"
+}
+
 # Watchtower 가 Docker Hub 를 확인하는 주기(초).
 #
 # ⚠️ 짧게 두면 Docker Hub rate limit 에 걸린다.
@@ -127,6 +193,24 @@ variable "dockerhub_token" {
 variable "watchtower_poll_interval" {
   type    = number
   default = 300
+}
+
+# Firebase 서비스 계정 키(JSON 전문).
+#
+# 이미지에 구워 넣지 않는 이유: Docker Hub 에 개인키가 박힌다. private
+# 저장소라도 레지스트리 자격증명이 새면 키도 같이 샌다. 그래서 SSM 에
+# 넣고 부팅 시 파일로 떨궈 컨테이너에 읽기 전용으로 마운트한다.
+#
+#   로컬 : export TF_VAR_firebase_credentials_json="$(cat firebase-service-account.json)"
+#   CI   : GitHub Secrets -> env: TF_VAR_firebase_credentials_json: ${{ secrets.FIREBASE_KEY }}
+#
+# 기본값 "{}" 는 "키 없음" 을 뜻한다. SSM 파라미터는 빈 문자열을 허용하지
+# 않아 자리표시자가 필요하다. 이 값이면 FirebaseConfig 가 IOException 을
+# 잡아 warn 만 남기고 앱은 정상 기동한다(푸시 알림만 비활성).
+variable "firebase_credentials_json" {
+  type      = string
+  sensitive = true
+  default   = "{}"
 }
 
 variable "docdb_username" {

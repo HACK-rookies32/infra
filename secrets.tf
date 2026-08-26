@@ -55,3 +55,27 @@ resource "aws_ssm_parameter" "dockerhub_token" {
   type        = "SecureString"
   value       = var.dockerhub_token
 }
+
+# WAS 이미지는 Docker Hub 계정이 달라(variables.tf 주석 참고) 토큰도 별개다.
+# 파라미터를 나눠 두면 IAM 으로 티어별 접근을 좁힐 여지도 남는다.
+resource "aws_ssm_parameter" "was_dockerhub_token" {
+  name        = "/kidhackapp/dockerhub/was-token"
+  description = "Docker Hub PAT (read-only) for pulling the WAS image"
+  type        = "SecureString"
+  value       = var.was_dockerhub_token
+}
+
+# Firebase 서비스 계정 키(JSON 전문).
+#
+# WAS 가 부팅 시 이 값을 /opt/app/firebase.json 으로 떨구고 컨테이너에
+# 읽기 전용으로 마운트한다. 이미지에 구워 넣으면 Docker Hub 에 개인키가
+# 박히므로 DB 비밀번호와 같은 경로로 다룬다.
+#
+# 값이 기본값("{}")이면 FirebaseConfig 가 초기화에 실패하고 warn 만 남긴다.
+# 앱은 정상 기동하되 푸시 알림만 비활성 상태가 된다.
+resource "aws_ssm_parameter" "firebase_key" {
+  name        = "/kidhackapp/app/firebase-key"
+  description = "Firebase service account JSON for kidhack-backend"
+  type        = "SecureString"
+  value       = var.firebase_credentials_json
+}
