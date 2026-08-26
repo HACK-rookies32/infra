@@ -39,13 +39,18 @@ variable "keep_final_snapshot" {
   default = false
 }
 
-# 서비스 도메인 (예: "careguard.shop"). 가비아 등에서 구매 후 여기에 넣는다.
+# 서비스 도메인. 현재 값은 Route 53 에서 직접 등록한 도메인이다.
+#
+# Route 53 Domains 로 등록하면 호스팅 존이 자동 생성되고 도메인의 네임서버도
+# 그 존으로 자동 연결된다. 즉 외부 등록기관(가비아 등)에서 샀을 때 필요했던
+# "NS 4 개를 등록기관에 손으로 입력" 단계가 아예 없다.
+#
 # 빈 문자열이면 Route 53 / ACM / 443 리스너가 아예 생성되지 않고 HTTP 80 만 뜬다.
-# 값을 주면 호스팅 존 -> 인증서 -> 검증 -> 443 리스너 -> Alias 레코드가
+# 값을 주면 호스팅 존 조회 -> 인증서 -> DNS 검증 -> 443 리스너 -> Alias 레코드가
 # 한 번의 apply 로 전부 구성된다. 자세한 절차는 dns.tf 상단 주석 참고.
 variable "domain_name" {
   type    = string
-  default = "team1domain.store"
+  default = "kidhackapp.com"
 }
 
 # Oracle SID. WAS 의 JDBC URL 에도 이 값이 그대로 들어간다. 8자 이하.

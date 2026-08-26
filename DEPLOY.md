@@ -3,7 +3,7 @@
 H.A.C.K 자녀보호앱(careguard)을 로컬 개발 환경에서 AWS로 올릴 때 무엇이 바뀌는지와,
 실제 배포 절차를 정리한 문서입니다.
 
-- **서비스 주소**: https://team1domain.store
+- **서비스 주소**: https://kidhackapp.com
 - **리전**: ap-northeast-2 (서울)
 - **인프라 코드**: `3. 개발/hack_terraform`
 
@@ -136,7 +136,7 @@ server: {
 필요한 설정은 API 주소 하나뿐입니다.
 
 ```
-https://team1domain.store
+https://kidhackapp.com
 ```
 
 웹과 달리 **절대 URL**을 써야 합니다(같은 오리진이 아니므로). 네이티브 앱이라 CORS는
@@ -198,7 +198,8 @@ terraform apply        # 30~40분 (RDS Oracle Multi-AZ가 대부분)
 ```
 
 호스팅 존은 Terraform 밖에서 관리되므로(`data` 참조) destroy해도 남습니다.
-**가비아 네임서버 재설정은 필요 없습니다.**
+`kidhackapp.com`은 Route 53에서 등록한 도메인이라 네임서버가 자동 연결되어 있습니다.
+**등록기관에서 손으로 할 설정이 없습니다.**
 
 ### 6-2. 프론트엔드 빌드 & 업로드
 
@@ -275,8 +276,8 @@ sudo systemctl start careguard-sync
 terraform output
 
 # HTTPS / 리다이렉트
-curl -I https://team1domain.store          # 200
-curl -I http://team1domain.store           # 301 → https
+curl -I https://kidhackapp.com          # 200
+curl -I http://kidhackapp.com           # 301 → https
 
 # 타깃 헬스
 aws elbv2 describe-target-health --target-group-arn \
@@ -333,7 +334,9 @@ terraform destroy
 - `keep_final_snapshot = false`(기본)이면 스냅샷 없이 빠르게 정리됩니다.
   최종 제출 시점에만 `true`로 바꾸세요.
 - 호스팅 존은 남습니다 → 다시 `apply`하면 도메인이 그대로 살아납니다.
-- S3 버킷의 산출물도 남으므로 재배포가 빠릅니다.
+- **S3 버킷은 산출물까지 전부 삭제됩니다.** 버킷에 `force_destroy = true`가 걸려 있습니다.
+  이 옵션이 없으면 버저닝 때문에 `BucketNotEmpty`로 destroy 자체가 실패합니다.
+  따라서 재배포 시 `dist.tar.gz`와 jar를 다시 올려야 합니다 (6-2, 6-3).
 
 프로젝트를 완전히 종료할 때는 콘솔에서 Route 53 호스팅 존(월 $0.50)을 직접 삭제하세요.
 

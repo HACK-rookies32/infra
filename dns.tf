@@ -7,16 +7,21 @@
 # Alias 레코드까지 한 번의 apply 로 구성된다.
 #
 # ------------------------------------------------------------------
-# 사전 조건 (계정당 최초 1 회, Terraform 밖에서)
+# 사전 조건
 #
-#   1) Route 53 호스팅 존이 존재할 것.
-#      현재 계정에는 이미 있다: team1domain.store / Z0982309EXS2BF34ZT68
-#   2) 그 존의 NS 4 개를 가비아 > 네임서버 설정에 등록할 것.
-#      확인: aws route53 get-hosted-zone --id <ZONE_ID> \
-#              --query "DelegationSet.NameServers"
+# kidhackapp.com 은 Route 53 에서 직접 등록한 도메인이다. Route 53 Domains 로
+# 등록하면 호스팅 존이 자동으로 만들어지고, 도메인의 네임서버도 그 존의
+# 위임 세트로 자동 설정된다. 따라서 손으로 할 일이 없다.
 #
-# 이 두 가지만 맞으면 이후 destroy/apply 를 몇 번 반복하든
-# 가비아를 다시 건드릴 일이 없다. 존을 resource 가 아니라 data 로 둔 이유다.
+# 외부 등록기관(가비아 등)에서 산 도메인이었다면 "존의 NS 4 개를 등록기관
+# 관리 페이지에 입력" 하는 단계가 필요했지만, 이 경우엔 해당되지 않는다.
+#
+# 확인만 해두면 된다 (둘의 NS 4 개가 일치해야 한다):
+#   aws route53 list-hosted-zones --query "HostedZones[?Name=='kidhackapp.com.']"
+#   aws route53domains get-domain-detail --region us-east-1 \
+#     --domain-name kidhackapp.com --query "Nameservers[].Name"
+#
+# 참고: route53domains API 는 us-east-1 에만 있다. 도메인 자체는 리전과 무관하다.
 # ------------------------------------------------------------------
 
 locals {
@@ -32,16 +37,20 @@ locals {
 
 # 호스팅 존은 Terraform 이 "만들지 않고 조회만" 한다. 이유가 중요하다.
 #
-# Route 53 은 존을 생성할 때마다 NS 4 개를 무작위로 새로 배정한다. 따라서
-# 존을 resource 로 관리하면 destroy/apply 를 할 때마다 NS 가 바뀌고,
-# 그때마다 가비아에서 네임서버를 손으로 다시 설정해야 한다.
-# (실제로 이 프로젝트에서 그 일이 이미 한 번 발생했다)
+# Route 53 은 존을 생성할 때마다 NS 4 개를 무작위로 새로 배정한다. 존을 resource
+# 로 관리하면 destroy/apply 를 할 때마다 NS 가 바뀐다.
 #
-# 존을 Terraform 밖에 두면 NS 가 영구 고정되어, 가비아 설정은 최초 1 회로 끝난다.
+# 그런데 Route 53 등록 도메인의 네임서버는 "등록 시점의 존" 을 가리키도록
+# 한 번 설정된 것이고, 존을 지웠다 다시 만들어도 따라서 갱신되지 않는다.
+# 즉 존을 resource 로 두면 destroy 한 순간 도메인이 죽고, 콘솔(또는
+# route53domains update-domain-nameservers)에서 NS 를 손으로 다시 맞춰야 한다.
+#
+# 존을 Terraform 밖에 두면 NS 가 영구 고정되어 그럴 일이 없다.
 # 존 안의 레코드(ACM 검증, Alias)는 아래에서 Terraform 이 정상적으로 관리한다.
+# destroy 시 이 레코드들만 지워지고 존과 도메인은 그대로 남는다.
 #
 # 존이 없는 계정에서 처음 시작한다면 한 번만 만들어 두면 된다:
-#   aws route53 create-hosted-zone --name team1domain.store \
+#   aws route53 create-hosted-zone --name kidhackapp.com \
 #     --caller-reference $(date +%s)
 data "aws_route53_zone" "main" {
   count        = local.dns_enabled
@@ -101,7 +110,7 @@ resource "aws_acm_certificate_validation" "cert" {
 # 도메인 -> ALB.
 # ALB 는 IP 가 고정이 아니라 A 레코드를 쓸 수 없고, 루트 도메인에는 CNAME 이
 # 금지되어 있다. Route 53 의 Alias 레코드만이 둘 다를 해결한다.
-# (가비아 DNS 를 그대로 썼다면 www 서브도메인만 가능했을 것)
+# (등록기관 기본 DNS 를 그대로 썼다면 www 서브도메인만 가능했을 것)
 resource "aws_route53_record" "alias" {
   for_each = toset(local.cert_domains)
 

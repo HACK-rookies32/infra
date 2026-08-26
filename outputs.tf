@@ -3,10 +3,14 @@ output "alb_dns_name" {
   value       = aws_lb.ext_alb.dns_name
 }
 
-# 가비아 관리 페이지 > 네임서버 설정에 입력할 값 4 개.
-# 이것이 도메인 연결에서 유일하게 손으로 하는 단계이며, 최초 1 회만 하면 된다.
+# 호스팅 존의 NS 4 개.
+# Route 53 등록 도메인이라 등록기관에 입력할 일은 없고, 도메인에 설정된 NS 와
+# 일치하는지 확인하는 용도다. 불일치하면 도메인이 이 존을 안 보고 있다는 뜻이며,
+# ACM DNS 검증이 영원히 pending 으로 남는 원인이 된다.
+#   aws route53domains get-domain-detail --region us-east-1 \
+#     --domain-name <도메인> --query "Nameservers[].Name"
 output "route53_name_servers" {
-  description = "Set these 4 name servers at your registrar (Gabia). One-time manual step."
+  description = "Hosted zone NS records. Must match the domain's configured name servers."
   value       = var.domain_name != "" ? data.aws_route53_zone.main[0].name_servers : []
 }
 
