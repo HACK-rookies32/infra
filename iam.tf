@@ -3,7 +3,7 @@
 # ==========================================
 
 resource "aws_iam_role" "ec2_role" {
-  name = "saferookids-ec2-role"
+  name = "kidhackapp-ec2-role"
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
@@ -21,7 +21,7 @@ resource "aws_iam_role_policy_attachment" "ssm_attach" {
 }
 
 resource "aws_iam_policy" "s3_access" {
-  name = "saferookids-s3-policy"
+  name = "kidhackapp-s3-policy"
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [{
@@ -52,7 +52,7 @@ resource "aws_iam_role_policy_attachment" "s3_attach" {
 # 티어별로 역할을 나누면 더 좁힐 수 있으나, 지금은 같은 팀이 같은 이미지를
 # 배포하는 구조라 역할 2 벌을 유지하는 비용이 더 크다고 보고 두지 않았다.
 resource "aws_iam_policy" "ssm_params" {
-  name = "saferookids-ssm-params-policy"
+  name = "kidhackapp-ssm-params-policy"
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
@@ -90,6 +90,6 @@ resource "aws_iam_role_policy_attachment" "ssm_params_attach" {
 }
 
 resource "aws_iam_instance_profile" "ec2_profile" {
-  name = "saferookids-ec2-profile"
+  name = "kidhackapp-ec2-profile"
   role = aws_iam_role.ec2_role.name
 }

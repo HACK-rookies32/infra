@@ -125,12 +125,12 @@ DocumentDB는 Amazon RDS CA(프라이빗 CA)가 발급한 인증서를 씁니다
 
 | 파라미터 | 용도 | 값의 출처 |
 |---|---|---|
-| `/saferookids/rds/password` | Oracle 마스터 | `TF_VAR_db_password` |
-| `/saferookids/docdb/password` | DocumentDB 마스터 | `TF_VAR_docdb_password` |
-| `/saferookids/app/jwt-secret` | JWT 서명 키 | Terraform 자동 생성 (64자 난수) |
-| `/saferookids/dockerhub/token` | WEB 이미지 pull | `TF_VAR_dockerhub_token` |
-| `/saferookids/dockerhub/was-token` | WAS 이미지 pull | `TF_VAR_was_dockerhub_token` |
-| `/saferookids/app/firebase-key` | FCM 서비스 계정 | `TF_VAR_firebase_credentials_json` (선택) |
+| `/kidhackapp/rds/password` | Oracle 마스터 | `TF_VAR_db_password` |
+| `/kidhackapp/docdb/password` | DocumentDB 마스터 | `TF_VAR_docdb_password` |
+| `/kidhackapp/app/jwt-secret` | JWT 서명 키 | Terraform 자동 생성 (64자 난수) |
+| `/kidhackapp/dockerhub/token` | WEB 이미지 pull | `TF_VAR_dockerhub_token` |
+| `/kidhackapp/dockerhub/was-token` | WAS 이미지 pull | `TF_VAR_was_dockerhub_token` |
+| `/kidhackapp/app/firebase-key` | FCM 서비스 계정 | `TF_VAR_firebase_credentials_json` (선택) |
 
 Docker Hub 토큰이 두 개인 이유는 **WEB 과 WAS 의 이미지 계정이 다르기** 때문입니다
 (`bulletbear` / `jotriever`). `docker login` 은 레지스트리당 한 계정만 유지되지만
@@ -139,7 +139,7 @@ WEB 과 WAS 는 서로 다른 EC2 라 충돌하지 않습니다.
 값이 필요할 때는 이렇게 꺼냅니다.
 
 ```bash
-aws ssm get-parameter --name /saferookids/rds/password --with-decryption \
+aws ssm get-parameter --name /kidhackapp/rds/password --with-decryption \
   --query Parameter.Value --output text
 ```
 
@@ -386,7 +386,7 @@ curl -I http://kidhackapp.com           # 301 → https
 
 # 타깃 헬스
 aws elbv2 describe-target-health --target-group-arn \
-  $(aws elbv2 describe-target-groups --names saferookids-was-tg \
+  $(aws elbv2 describe-target-groups --names kidhackapp-was-tg \
     --query "TargetGroups[0].TargetGroupArn" --output text)
 ```
 

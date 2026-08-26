@@ -4,7 +4,7 @@
 
 # RDS Subnet Group
 resource "aws_db_subnet_group" "rds" {
-  name       = "saferookids-rds-subnet-group"
+  name       = "kidhackapp-rds-subnet-group"
   subnet_ids = [aws_subnet.db_private_2a.id, aws_subnet.db_private_2c.id]
 }
 
@@ -13,7 +13,7 @@ resource "aws_db_subnet_group" "rds" {
 # NNE(Native Network Encryption) 옵션으로 별도 활성화해야 한다.
 # Oracle JDBC thin 드라이버는 NNE 를 자동 협상하므로 WAS 쪽 설정 변경은 불필요.
 resource "aws_db_option_group" "oracle" {
-  name                     = "saferookids-oracle-options"
+  name                     = "kidhackapp-oracle-options"
   engine_name              = "oracle-se2"
   major_engine_version     = "19"
   option_group_description = "Native Network Encryption for Oracle"
@@ -34,7 +34,7 @@ resource "aws_db_option_group" "oracle" {
 
 # RDS Oracle Instance (Multi-AZ: primary 2a / standby 2c)
 resource "aws_db_instance" "oracle" {
-  identifier = "saferookids-oracle-db"
+  identifier = "kidhackapp-oracle-db"
   engine     = "oracle-se2"
   # Oracle 에서 db_name 은 SID 이며, WAS 의 JDBC URL(.../ORCL)과 반드시 일치해야 한다.
   # 미지정 시 AWS 기본값도 ORCL 이지만, 기본값에 의존하면 어긋났을 때
@@ -67,18 +67,18 @@ resource "aws_db_instance" "oracle" {
 
   # 최종 스냅샷 여부는 var.keep_final_snapshot 로 제어한다 (variables.tf 주석 참고).
   skip_final_snapshot       = !var.keep_final_snapshot
-  final_snapshot_identifier = var.keep_final_snapshot ? "saferookids-oracle-db-final" : null
+  final_snapshot_identifier = var.keep_final_snapshot ? "kidhackapp-oracle-db-final" : null
 }
 
 # ElastiCache Subnet Group
 resource "aws_elasticache_subnet_group" "redis" {
-  name       = "saferookids-redis-subnet-group"
+  name       = "kidhackapp-redis-subnet-group"
   subnet_ids = [aws_subnet.db_private_2a.id, aws_subnet.db_private_2c.id]
 }
 
 # ElastiCache Redis (Multi-AZ Replication Group)
 resource "aws_elasticache_replication_group" "redis" {
-  replication_group_id       = "saferookids-redis-cluster"
+  replication_group_id       = "kidhackapp-redis-cluster"
   description                = "Multi-AZ Redis for Session Sharing"
   node_type                  = "cache.t3.micro"
   engine_version             = "7.1"
@@ -104,19 +104,19 @@ resource "aws_elasticache_replication_group" "redis" {
   snapshot_retention_limit  = 5
   snapshot_window           = "19:00-20:00"         # KST 04:00-05:00
   maintenance_window        = "sun:20:30-sun:21:30" # KST 일 05:30-06:30
-  final_snapshot_identifier = var.keep_final_snapshot ? "saferookids-redis-final" : null
+  final_snapshot_identifier = var.keep_final_snapshot ? "kidhackapp-redis-final" : null
 }
 
 # DocumentDB Subnet Group
 resource "aws_docdb_subnet_group" "docdb" {
-  name       = "saferookids-docdb-subnet-group"
+  name       = "kidhackapp-docdb-subnet-group"
   subnet_ids = [aws_subnet.db_private_2a.id, aws_subnet.db_private_2c.id]
 }
 
 # DocumentDB Cluster Parameter Group
 # TLS 는 기본값이 enabled 이지만, 전송 암호화를 코드로 명시해 두기 위해 별도 그룹을 만든다.
 resource "aws_docdb_cluster_parameter_group" "docdb" {
-  name        = "saferookids-docdb-params"
+  name        = "kidhackapp-docdb-params"
   family      = "docdb5.0"
   description = "Enforce TLS in transit for DocumentDB"
 
@@ -128,7 +128,7 @@ resource "aws_docdb_cluster_parameter_group" "docdb" {
 
 # DocumentDB Cluster (Primary 2a / Replica 2c)
 resource "aws_docdb_cluster" "mongo" {
-  cluster_identifier              = "saferookids-docdb-cluster"
+  cluster_identifier              = "kidhackapp-docdb-cluster"
   engine                          = "docdb"
   engine_version                  = "5.0.0"
   port                            = 27017
@@ -147,20 +147,20 @@ resource "aws_docdb_cluster" "mongo" {
   preferred_maintenance_window = "sun:19:30-sun:20:30" # KST 일 04:30-05:30
 
   skip_final_snapshot       = !var.keep_final_snapshot
-  final_snapshot_identifier = var.keep_final_snapshot ? "saferookids-docdb-final" : null
+  final_snapshot_identifier = var.keep_final_snapshot ? "kidhackapp-docdb-final" : null
 }
 
 # 인스턴스 2 대를 각 AZ 에 고정 배치. 먼저 뜬 쪽이 Writer, 나머지가 Reader 가 된다.
 # WAS 는 개별 인스턴스가 아니라 아래 outputs 의 클러스터/리더 엔드포인트로만 접속할 것.
 resource "aws_docdb_cluster_instance" "mongo_2a" {
-  identifier         = "saferookids-docdb-2a"
+  identifier         = "kidhackapp-docdb-2a"
   cluster_identifier = aws_docdb_cluster.mongo.id
   instance_class     = "db.t3.medium"
   availability_zone  = "ap-northeast-2a"
 }
 
 resource "aws_docdb_cluster_instance" "mongo_2c" {
-  identifier         = "saferookids-docdb-2c"
+  identifier         = "kidhackapp-docdb-2c"
   cluster_identifier = aws_docdb_cluster.mongo.id
   instance_class     = "db.t3.medium"
   availability_zone  = "ap-northeast-2c"

@@ -7,12 +7,12 @@ resource "aws_vpc" "main" {
   enable_dns_hostnames = true
   enable_dns_support   = true
 
-  tags = { Name = "saferookids-vpc" }
+  tags = { Name = "kidhackapp-vpc" }
 }
 
 resource "aws_internet_gateway" "igw" {
   vpc_id = aws_vpc.main.id
-  tags   = { Name = "saferookids-igw" }
+  tags   = { Name = "kidhackapp-igw" }
 }
 
 # Subnets
@@ -20,79 +20,79 @@ resource "aws_subnet" "public_2a" {
   vpc_id            = aws_vpc.main.id
   cidr_block        = "192.168.0.0/24"
   availability_zone = "ap-northeast-2a"
-  tags              = { Name = "saferookids-public-2a" }
+  tags              = { Name = "kidhackapp-public-2a" }
 }
 
 resource "aws_subnet" "public_2c" {
   vpc_id            = aws_vpc.main.id
   cidr_block        = "192.168.1.0/24"
   availability_zone = "ap-northeast-2c"
-  tags              = { Name = "saferookids-public-2c" }
+  tags              = { Name = "kidhackapp-public-2c" }
 }
 
 resource "aws_subnet" "web_private_2a" {
   vpc_id            = aws_vpc.main.id
   cidr_block        = "192.168.10.0/24"
   availability_zone = "ap-northeast-2a"
-  tags              = { Name = "saferookids-web-private-2a" }
+  tags              = { Name = "kidhackapp-web-private-2a" }
 }
 
 resource "aws_subnet" "web_private_2c" {
   vpc_id            = aws_vpc.main.id
   cidr_block        = "192.168.11.0/24"
   availability_zone = "ap-northeast-2c"
-  tags              = { Name = "saferookids-web-private-2c" }
+  tags              = { Name = "kidhackapp-web-private-2c" }
 }
 
 resource "aws_subnet" "was_private_2a" {
   vpc_id            = aws_vpc.main.id
   cidr_block        = "192.168.20.0/24"
   availability_zone = "ap-northeast-2a"
-  tags              = { Name = "saferookids-was-private-2a" }
+  tags              = { Name = "kidhackapp-was-private-2a" }
 }
 
 resource "aws_subnet" "was_private_2c" {
   vpc_id            = aws_vpc.main.id
   cidr_block        = "192.168.21.0/24"
   availability_zone = "ap-northeast-2c"
-  tags              = { Name = "saferookids-was-private-2c" }
+  tags              = { Name = "kidhackapp-was-private-2c" }
 }
 
 resource "aws_subnet" "db_private_2a" {
   vpc_id            = aws_vpc.main.id
   cidr_block        = "192.168.30.0/24"
   availability_zone = "ap-northeast-2a"
-  tags              = { Name = "saferookids-db-private-2a" }
+  tags              = { Name = "kidhackapp-db-private-2a" }
 }
 
 resource "aws_subnet" "db_private_2c" {
   vpc_id            = aws_vpc.main.id
   cidr_block        = "192.168.31.0/24"
   availability_zone = "ap-northeast-2c"
-  tags              = { Name = "saferookids-db-private-2c" }
+  tags              = { Name = "kidhackapp-db-private-2c" }
 }
 
 # Elastic IPs & Multi-AZ NAT Gateways
 resource "aws_eip" "nat_2a" {
   domain = "vpc"
-  tags   = { Name = "saferookids-nat-eip-2a" }
+  tags   = { Name = "kidhackapp-nat-eip-2a" }
 }
 
 resource "aws_eip" "nat_2c" {
   domain = "vpc"
-  tags   = { Name = "saferookids-nat-eip-2c" }
+  tags   = { Name = "kidhackapp-nat-eip-2c" }
 }
 
 resource "aws_nat_gateway" "nat_2a" {
   allocation_id = aws_eip.nat_2a.id
   subnet_id     = aws_subnet.public_2a.id
-  tags          = { Name = "saferookids-nat-2a" }
+  tags          = { Name = "kidhackapp-nat-2a" }
 }
 
 resource "aws_nat_gateway" "nat_2c" {
   allocation_id = aws_eip.nat_2c.id
   subnet_id     = aws_subnet.public_2c.id
-  tags          = { Name = "saferookids-nat-2c" }
+  tags          = { Name = "kidhackapp-nat-2c" }
 }
 
 # Route Tables
@@ -102,7 +102,7 @@ resource "aws_route_table" "public" {
     cidr_block = "0.0.0.0/0"
     gateway_id = aws_internet_gateway.igw.id
   }
-  tags = { Name = "saferookids-public-rt" }
+  tags = { Name = "kidhackapp-public-rt" }
 }
 
 resource "aws_route_table" "private_2a" {
@@ -111,7 +111,7 @@ resource "aws_route_table" "private_2a" {
     cidr_block     = "0.0.0.0/0"
     nat_gateway_id = aws_nat_gateway.nat_2a.id
   }
-  tags = { Name = "saferookids-private-rt-2a" }
+  tags = { Name = "kidhackapp-private-rt-2a" }
 }
 
 resource "aws_route_table" "private_2c" {
@@ -120,7 +120,7 @@ resource "aws_route_table" "private_2c" {
     cidr_block     = "0.0.0.0/0"
     nat_gateway_id = aws_nat_gateway.nat_2c.id
   }
-  tags = { Name = "saferookids-private-rt-2c" }
+  tags = { Name = "kidhackapp-private-rt-2c" }
 }
 
 # DB 전용 라우트 테이블 — 0.0.0.0/0 (NAT) 경로가 없다.
@@ -134,7 +134,7 @@ resource "aws_route_table" "private_2c" {
 # 남는 건 local 과 S3 게이트웨이 엔드포인트뿐이고 둘 다 리전 단위라 하나면 충분하다.
 resource "aws_route_table" "db" {
   vpc_id = aws_vpc.main.id
-  tags   = { Name = "saferookids-db-rt" }
+  tags   = { Name = "kidhackapp-db-rt" }
 }
 
 # Route Table Associations
@@ -183,5 +183,5 @@ resource "aws_vpc_endpoint" "s3" {
     aws_route_table.private_2c.id,
     aws_route_table.db.id
   ]
-  tags = { Name = "saferookids-s3-endpoint" }
+  tags = { Name = "kidhackapp-s3-endpoint" }
 }

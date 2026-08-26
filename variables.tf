@@ -10,7 +10,7 @@ variable "vpc_cidr" {
 
 variable "s3_bucket_name" {
   type    = string
-  default = "saferookids-media-bucket-2026"
+  default = "kidhackapp-media-bucket-2026"
 }
 
 variable "db_username" {
