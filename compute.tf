@@ -105,9 +105,12 @@ locals {
 
   # WAS 도 WEB 과 같은 방식이다. S3 에서 jar 를 받지 않고 Docker Hub 이미지를
   # 받아 컨테이너로 뜬 뒤, 갱신은 Watchtower 가 처리한다.
-  # (bucket 을 넘기지 않는 이유: jar 다운로드가 사라져 쓰는 곳이 없어졌다.
-  #  S3 업로드 전환 때 앱이 버킷 이름을 알아야 하면 그때 다시 추가할 것)
+  #
+  # bucket 은 jar 다운로드용이 아니라 첨부파일 업로드용으로 넘긴다.
+  # 앱이 아직 S3 를 구현하기 전이라 지금은 쓰이지 않지만, user_data 가 바뀌면
+  # EC2 가 재생성되므로 값이 확정된 지금 미리 넣어 재생성을 한 번 아낀다.
   was_user_data = templatefile("${path.module}/templates/was_user_data.sh.tftpl", {
+    bucket               = aws_s3_bucket.media.id
     region               = var.aws_region
     oracle_endpoint      = aws_db_instance.oracle.endpoint
     oracle_db_name       = var.oracle_db_name

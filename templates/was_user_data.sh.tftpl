@@ -192,6 +192,21 @@ SPRING_DATA_REDIS_SSL_ENABLED=true
 # --- Firebase ---
 # 절대경로를 주면 FirebaseConfig 가 클래스패스가 아니라 파일시스템에서 읽는다.
 FIREBASE_CREDENTIALS_PATH=/run/secrets/firebase.json
+
+# --- S3 (첨부파일) ---
+# APP_S3_BUCKET -> app.s3.bucket (relaxed binding).
+# 이 값이 비어 있으면 앱은 로컬 디스크에 저장하는 기존 동작을 쓴다.
+# 즉 백엔드가 아직 S3 를 구현하기 전이라도 이 줄은 무해하다.
+#
+# 미리 넣어두는 이유: user_data 가 바뀌면 user_data_replace_on_change 때문에
+# EC2 가 재생성된다. S3 구현이 머지될 때 이 줄을 추가하면 그때 한 번 더
+# 갈아엎어야 하므로, 값이 확정된 지금 넣어 재생성을 아낀다.
+#
+# AWS_REGION 은 SDK 표준 환경변수다. 없으면 SDK 가 IMDS 로 리전을 조회하는데
+# (컨테이너 안이라 hop 2 가 필요하고 이미 그렇게 설정되어 있지만) 왕복이 한 번
+# 줄고 동작이 명시적이 된다.
+APP_S3_BUCKET=${bucket}
+AWS_REGION=${region}
 EOF
 
 chmod 600 /opt/app/app.env
