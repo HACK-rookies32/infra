@@ -100,6 +100,7 @@ locals {
     dockerhub_image          = var.dockerhub_image
     dockerhub_username       = var.dockerhub_username
     dockerhub_token_param    = aws_ssm_parameter.dockerhub_token.name
+    watchtower_image         = var.watchtower_image
     watchtower_poll_interval = var.watchtower_poll_interval
   })
 
@@ -130,6 +131,7 @@ locals {
     dockerhub_username    = var.was_dockerhub_username
     dockerhub_token_param = aws_ssm_parameter.was_dockerhub_token.name
 
+    watchtower_image         = var.watchtower_image
     watchtower_poll_interval = var.watchtower_poll_interval
   })
 }

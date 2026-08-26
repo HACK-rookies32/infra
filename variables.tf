@@ -160,6 +160,26 @@ variable "was_dockerhub_token" {
   sensitive = true
 }
 
+# Watchtower 이미지.
+#
+# ⚠️ containrrr/watchtower 를 쓰면 안 된다.
+#   원본은 유지보수가 중단되어 Docker API 1.25 클라이언트로 고정되어 있는데,
+#   Docker Engine 29 부터 최소 지원 API 가 1.40 으로 올라가면서 아예 통신이
+#   되지 않는다. 컨테이너가 이 오류로 재시작만 반복한다:
+#     "client version 1.25 is too old. Minimum supported API version is 1.40"
+#   원본에는 이 문제를 고칠 패치가 나오지 않는다.
+#
+#   nickfedor/watchtower 는 활발히 유지보수되는 포크이며, 설정 환경변수와
+#   컨테이너 라벨(com.centurylinklabs.watchtower.enable)이 원본과 동일해서
+#   이미지 이름만 바꾸면 된다.
+#
+# 태그를 고정하는 이유: latest 로 두면 포크가 갱신될 때 또 조용히 깨질 수 있다.
+# 올릴 때는 이 값을 명시적으로 올린다.
+variable "watchtower_image" {
+  type    = string
+  default = "nickfedor/watchtower:1.21.2"
+}
+
 # Watchtower 가 Docker Hub 를 확인하는 주기(초).
 #
 # ⚠️ 짧게 두면 Docker Hub rate limit 에 걸린다.

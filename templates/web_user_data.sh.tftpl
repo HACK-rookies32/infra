@@ -25,8 +25,37 @@ exec > /var/log/user-data.log 2>&1
 # ==================================================================
 
 export DEBIAN_FRONTEND=noninteractive
-apt-get update
-apt-get install -y ca-certificates curl gnupg unzip
+
+# ------------------------------------------------------------------
+# apt 재시도 래퍼
+#
+# 부팅 직후에는 cloud-init 과 unattended-upgrades 가 apt lock 을 잡고 있다.
+# 그 사이에 apt-get 을 부르면 이렇게 실패한다:
+#   E: Could not get lock /var/lib/apt/lists/lock. It is held by process N (python3)
+#   E: Package 'docker-ce' has no installation candidate
+#
+# 이 스크립트는 set -e 가 아니므로(-uxo pipefail 뿐) 실패해도 그냥 진행한다.
+# 그래서 증상이 한참 뒤 "docker: command not found" 로 나타나 원인을 찾기 어렵다.
+# 실제로 4 대 중 1 대에서 이 레이스가 터졌다.
+#
+# DPkg::Lock::Timeout 은 dpkg 프런트엔드 lock 만 커버하고 lists lock 은
+# 커버하지 않으므로, 옵션과 재시도 루프를 함께 쓴다.
+# 끝까지 실패하면 조용히 넘어가지 않고 즉시 중단한다.
+# ------------------------------------------------------------------
+apt_retry() {
+  for attempt in $(seq 1 30); do
+    if apt-get -o DPkg::Lock::Timeout=120 "$@"; then
+      return 0
+    fi
+    echo "apt-get $1 실패 (시도 $attempt/30). 10 초 후 재시도한다."
+    sleep 10
+  done
+  echo "FATAL: apt-get $1 가 30 회 재시도 후에도 실패했다. 부팅을 중단한다."
+  exit 1
+}
+
+apt_retry update
+apt_retry install -y ca-certificates curl gnupg unzip
 
 # ------------------------------------------------------------------
 # Docker (공식 저장소)
@@ -41,8 +70,8 @@ echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/docker.gpg] \
 https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo $VERSION_CODENAME) stable" \
   > /etc/apt/sources.list.d/docker.list
 
-apt-get update
-apt-get install -y docker-ce docker-ce-cli containerd.io
+apt_retry update
+apt_retry install -y docker-ce docker-ce-cli containerd.io
 
 # ------------------------------------------------------------------
 # 컨테이너 로그 로테이션
@@ -129,6 +158,14 @@ fi
 #
 # watchtower 라벨이 붙은 컨테이너만 갱신 대상이 된다.
 # ------------------------------------------------------------------
+# ⚠️ RestartSec 을 짧게 두지 말 것.
+# 이미지가 아직 Docker Hub 에 없으면 docker run 이 매번 pull 을 시도하고,
+# 그 하나하나가 레지스트리 인증 요청이 된다. 30 초로 뒀을 때 4 대 합쳐
+# 분당 8 회를 두드렸고, 토큰을 교체하는 순간 그게 전부 "실패한 로그인" 으로
+# 집계되어 Docker Hub 가 계정을 차단했다:
+#   toomanyrequests: too many failed login attempts for username or IP address
+# 300 초면 분당 0.8 회로 떨어진다. 이미지가 올라오면 첫 시도에 성공하므로
+# 이 간격은 "아직 배포 전" 구간에서만 의미가 있다.
 cat > /etc/systemd/system/careguard-web.service <<UNIT
 [Unit]
 Description=careguard web (nginx + React dist)
@@ -149,7 +186,7 @@ ExecStart=/usr/bin/docker run -d \\
   -l com.centurylinklabs.watchtower.enable=true \\
   ${dockerhub_image}:latest
 Restart=on-failure
-RestartSec=30
+RestartSec=300
 
 [Install]
 WantedBy=multi-user.target
@@ -192,4 +229,4 @@ docker run -d \
   -e WATCHTOWER_POLL_INTERVAL=${watchtower_poll_interval} \
   -e WATCHTOWER_CLEANUP=true \
   -e WATCHTOWER_LABEL_ENABLE=true \
-  containrrr/watchtower
+  ${watchtower_image}
