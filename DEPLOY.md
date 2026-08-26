@@ -67,26 +67,41 @@ EC2 가 자기 IAM 역할로 자격증명을 꺼내 스스로 당겨옵니다.
 
 ## 2. 백엔드: 무엇이 어떻게 바뀌는가
 
-`application.yml`은 **수정하지 않습니다.** WAS 부팅 시 `/opt/app/app.env`에 환경변수를
-써서 덮어쓰는 방식입니다(Spring Boot relaxed binding). 로컬 개발이 그대로 유지됩니다.
-이 파일은 컨테이너에 `--env-file` 로 전달됩니다.
+기본 `application.yml`은 **로컬 전용(H2 / localhost)으로 그대로 둡니다.** 로컬 개발과
+CI 테스트가 외부 DB 없이 돌아야 하기 때문입니다(러너와 개발자 PC 는 프라이빗 서브넷의
+RDS 에 애초에 접속할 수 없습니다). 운영은 **prod 프로파일**이 이 값을 덮어씁니다.
 
-| `application.yml` (로컬) | 클라우드에서 덮어쓰는 환경변수 |
-|---|---|
-| `jdbc:h2:mem:kidhackdb;MODE=Oracle` | `SPRING_DATASOURCE_URL=jdbc:oracle:thin:@//<rds>/ORCL` |
-| `org.h2.Driver` | `SPRING_DATASOURCE_DRIVER_CLASS_NAME=oracle.jdbc.OracleDriver` |
-| `sa` / (빈 비밀번호) | `SPRING_DATASOURCE_USERNAME/PASSWORD` ← SSM에서 조회 |
-| `h2.console.enabled: true` | `SPRING_H2_CONSOLE_ENABLED=false` |
-| — | `SPRING_JPA_DATABASE_PLATFORM=org.hibernate.dialect.OracleDialect` |
-| `mongodb://localhost:27017/...` | `SPRING_DATA_MONGODB_URI=mongodb://...?tls=true&replicaSet=rs0&retryWrites=false` |
-| `redis. host: localhost` | `SPRING_DATA_REDIS_HOST=<elasticache>` + `SPRING_DATA_REDIS_SSL_ENABLED=true` |
-| `jwt.secret: local-test-...` | `JWT_SECRET` ← Terraform이 생성한 64자 난수, SSM에서 조회 |
-| `firebase-service-account.json` (클래스패스) | `FIREBASE_CREDENTIALS_PATH=/run/secrets/firebase.json` ← SSM에서 받아 마운트 |
-| — | `SERVER_FORWARD_HEADERS_STRATEGY=framework` |
+운영 설정은 두 군데로 나뉩니다. 기준은 **"이미지에 구워도 되는 값인가"** 하나입니다.
+
+| | 어디에 있나 | 무엇이 들어가나 |
+|---|---|---|
+| **prod yml** | backend 레포 GitHub Secrets 의 `APPLICATION_PROD_YML`(base64). CD 가 빌드 직전에 `src/main/resources/application-prod.yml` 로 복원해 jar 에 넣음 | RDS 엔드포인트·계정명, Oracle 드라이버/다이얼렉트, `ddl-auto: validate`, H2 콘솔 off, Redis 엔드포인트+TLS, S3 버킷, `forward-headers-strategy` |
+| **app.env** | WAS 부팅 시 SSM 에서 받아 `/opt/app/app.env` 생성 → 컨테이너에 `--env-file` | `SPRING_PROFILES_ACTIVE=prod`, `SERVER_PORT`, `SPRING_DATASOURCE_PASSWORD`, `SPRING_DATA_MONGODB_URI`, `JWT_SECRET`, `AWS_REGION` |
+
+비밀번호를 이미지에 굽지 않는 이유는 **롤백**입니다. CD 는 `sha-` 태그를 남겨 두고 그
+이미지로 되돌리므로, 비밀번호가 이미지에 있으면 나중에 교체해도 옛 태그 안에 예전
+비밀번호가 영구히 남습니다. 그러면 Docker Hub 이미지를 pull 할 수 있는 사람이 곧 DB 에
+붙을 수 있는 사람이 됩니다. 반대로 엔드포인트·계정명은 프라이빗 서브넷(`rds_sg` 가
+`was_sg` 만 허용)이라 새어도 접속이 되지 않습니다.
+
+> ⚠️ **환경변수가 yml 보다 우선순위가 높습니다.** `app.env` 에 `SPRING_DATASOURCE_URL`
+> 같은 줄을 다시 넣으면 시크릿의 yml 이 아무 에러 없이 무시됩니다. 비밀이 아닌 값을
+> 바꿀 일이 생기면 backend 레포의 시크릿을 고치세요.
+
+> ⚠️ `SPRING_PROFILES_ACTIVE=prod` 가 빠지면 앱이 기본 프로파일로 떠서 **H2 인메모리로
+> 동작**합니다. 기동은 "성공" 하므로 에러가 나지 않고, 재배포 때 데이터가 통째로
+> 사라지는 형태로만 뒤늦게 드러납니다.
 
 > ⚠️ `app.env` 는 systemd `EnvironmentFile` 이 아니라 docker `--env-file` 로 읽힙니다.
 > **Docker 는 따옴표를 벗기지 않고 값의 일부로 취급합니다.** 값에 따옴표를 넣지 마세요.
 > 변수 확장도 하지 않으므로 MongoDB URI 의 `&` 나 `$` 는 안전합니다.
+
+### 스키마 최초 생성
+
+prod yml 은 `ddl-auto: validate` 라 테이블이 없으면 기동에 실패합니다. 빈 DB 에 처음
+배포할 때만 `app.env` 의 `#SPRING_JPA_HIBERNATE_DDL_AUTO=update` 주석을 풀어 한 번
+띄우고, 테이블 생성을 확인한 뒤 다시 주석 처리해 재기동하세요. 켜 둔 채로 두면 운영
+스키마에 자동 DDL 이 계속 나갑니다.
 
 ### 왜 이런 값들이 필요한가
 
@@ -98,11 +113,11 @@ DocumentDB는 재시도 가능 쓰기를 지원하지 않는데, MongoDB Java �
 DocumentDB의 레플리카셋 이름은 항상 `rs0` 고정입니다. 이걸 붙이면 드라이버가 토폴로지를
 발견해 쓰기는 Writer로, 읽기는 `readPreference`대로 보냅니다. 페일오버도 자동 추종합니다.
 
-**`SPRING_DATA_REDIS_SSL_ENABLED=true`**
+**`spring.data.redis.ssl.enabled: true`** (prod yml)
 ElastiCache에 전송 암호화가 켜져 있어 TLS로만 접속됩니다. 이 값이 없으면
 포트가 열려 있어도 접속에 실패합니다. **SG 문제로 착각하기 쉬운 장애**입니다.
 
-**`SERVER_FORWARD_HEADERS_STRATEGY=framework`**
+**`server.forward-headers-strategy: framework`** (prod yml)
 ALB → Nginx → NLB → WAS로 프록시가 2단입니다. Spring Boot는 기본적으로
 `X-Forwarded-Proto`를 무시하므로(`NONE`), 이 값이 없으면 리다이렉트가 `http://`로
 생성되어 무한 리다이렉트가 발생합니다.
@@ -436,7 +451,9 @@ docker logs watchtower
 | CI 는 성공했는데 배포가 안 됨 | 이미지 이름 불일치. 워크플로의 `IMAGE` 와 `var.dockerhub_image`/`var.was_image` 대조 |
 | 배포해도 그대로 | 컨테이너가 `:latest` 가 아닌 태그로 떠 있음 → Watchtower 는 갱신하지 않음 |
 | 업로드 파일이 배포마다 사라짐 | 볼륨 마운트 누락 (5-1) |
-| Redis 연결 실패 (포트는 열림) | `SPRING_DATA_REDIS_SSL_ENABLED` 누락 |
+| Redis 연결 실패 (포트는 열림) | prod yml 의 `spring.data.redis.ssl.enabled` 누락 |
+| DB 는 비었는데 앱은 멀쩡히 뜸 | `SPRING_PROFILES_ACTIVE=prod` 누락 → H2 인메모리로 동작 중 |
+| 기동 시 스키마 검증 실패 | 빈 DB 첫 배포 — `SPRING_JPA_HIBERNATE_DDL_AUTO=update` 를 한 번만 켤 것 |
 | `PKIX path building failed` | DocumentDB 트러스트스토어 구성 실패 → 이미지 빌드 단계 확인 |
 | DocumentDB 쓰기 실패 | `retryWrites=false` 누락 |
 | `ORA-12514` | Oracle SID 불일치 (`var.oracle_db_name`) |

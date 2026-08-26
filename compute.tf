@@ -107,17 +107,17 @@ locals {
   # WAS 도 WEB 과 같은 방식이다. S3 에서 jar 를 받지 않고 Docker Hub 이미지를
   # 받아 컨테이너로 뜬 뒤, 갱신은 Watchtower 가 처리한다.
   #
-  # bucket 은 jar 다운로드용이 아니라 첨부파일 업로드용으로 넘긴다.
-  # 앱이 아직 S3 를 구현하기 전이라 지금은 쓰이지 않지만, user_data 가 바뀌면
-  # EC2 가 재생성되므로 값이 확정된 지금 미리 넣어 재생성을 한 번 아낀다.
+  # ⚠️ 넘기는 값이 예전보다 훨씬 적다.
+  #    Oracle 엔드포인트/계정명, Redis 엔드포인트, S3 버킷 이름은 이제 앱
+  #    이미지 안의 application-prod.yml 이 들고 있다(backend 레포의 GitHub
+  #    Secrets: APPLICATION_PROD_YML). user_data 에는 이미지에 구우면 안 되는
+  #    값 — 비밀번호/서명키 — 만 남긴다. 자세한 근거는 템플릿 주석 참고.
+  #
+  #    그래서 RDS/Redis 에 대한 암묵적 의존이 사라졌다. 생성 순서를 유지하려고
+  #    아래 aws_instance.was 에 depends_on 을 명시해 둔다.
   was_user_data = templatefile("${path.module}/templates/was_user_data.sh.tftpl", {
-    bucket               = aws_s3_bucket.media.id
     region               = var.aws_region
-    oracle_endpoint      = aws_db_instance.oracle.endpoint
-    oracle_db_name       = var.oracle_db_name
     docdb_endpoint       = aws_docdb_cluster.mongo.endpoint
-    redis_endpoint       = aws_elasticache_replication_group.redis.primary_endpoint_address
-    db_username          = var.db_username
     docdb_username       = var.docdb_username
     db_password_param    = aws_ssm_parameter.db_password.name
     docdb_password_param = aws_ssm_parameter.docdb_password.name
@@ -279,6 +279,14 @@ resource "aws_instance" "was" {
 
   user_data                   = local.was_user_data
   user_data_replace_on_change = true
+
+  # user_data 가 더 이상 RDS/Redis 엔드포인트를 참조하지 않아(위 locals 주석)
+  # 암묵적 의존이 끊겼다. 명시하지 않으면 WAS 가 DB 보다 먼저 만들어져,
+  # 컨테이너가 접속 실패로 재시작만 반복하는 구간이 길어진다.
+  depends_on = [
+    aws_db_instance.oracle,
+    aws_elasticache_replication_group.redis,
+  ]
 
   # IMDSv2 강제 (locals.imds_v2 주석 참고)
   metadata_options {
