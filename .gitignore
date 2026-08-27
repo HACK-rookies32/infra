@@ -26,3 +26,13 @@ terraform.rc
 # 값이 평문으로 들어 있으므로 절대 커밋하지 말 것.
 .env.local
 .env
+
+# Firebase 서비스 계정 키.
+#
+# SSM(/kidhackapp/app/firebase-key)에 넣을 때 이 디렉터리에 두고
+#   export TF_VAR_firebase_credentials_json="$(cat firebase-service-account.json)"
+# 로 읽게 된다. 개인키가 평문으로 들어 있고 한 번 커밋되면 히스토리에 영구히
+# 남으므로(키를 새로 발급해도 옛 커밋 안에는 그대로다) 파일명 자체를 막아 둔다.
+# backend 레포도 같은 이름을 막고 있다.
+firebase-service-account.json
+*-firebase-adminsdk-*.json
