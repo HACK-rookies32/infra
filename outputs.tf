@@ -121,9 +121,17 @@ output "backend_prod_yml" {
       h2:
         console:
           enabled: false
+
+      # ⚠️ spring.data.mongodb.uri 가 아니라 spring.mongodb.uri 다.
+      # Boot 4.0 에서 접속 키가 옮겨졌고 옛 키는 deprecation level=error 라
+      # 바인딩되지 않는다. 옛 키를 쓰면 경고 한 줄 없이 무시되고 드라이버
+      # 기본값 localhost:27017 로 붙어, DocumentDB 주소를 넣어도 소용이 없다.
+      # (환경변수 이름은 app.env 와 맞추려고 SPRING_DATA_MONGODB_URI 로 유지한다.
+      #  아래처럼 플레이스홀더로 직접 참조하므로 이름이 달라도 무방하다.)
+      mongodb:
+        uri: $${SPRING_DATA_MONGODB_URI}
+
       data:
-        mongodb:
-          uri: $${SPRING_DATA_MONGODB_URI}
         redis:
           host: ${aws_elasticache_replication_group.redis.primary_endpoint_address}
           port: 6379
