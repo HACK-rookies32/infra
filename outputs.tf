@@ -105,10 +105,19 @@ output "backend_prod_yml" {
       jpa:
         database-platform: org.hibernate.dialect.OracleDialect
         hibernate:
-          # 빈 DB 첫 배포에서만 app.env 의 SPRING_JPA_HIBERNATE_DDL_AUTO=update 로
-          # 한 번 덮어쓴다. 자세한 절차는 DEPLOY.md "스키마 최초 생성" 참고.
+          # 스키마는 아래 Flyway 가 만든다. Hibernate 는 엔티티와 실제 테이블이
+          # 맞는지 검사만 한다. 어긋나면 기동을 거부하므로 스키마 변경이
+          # 마이그레이션 없이 새어 나가는 것을 여기서 잡는다.
           ddl-auto: validate
         show-sql: false
+      # 앱이 뜰 때 db/migration 의 V1, V2... 를 순서대로 적용한다.
+      # 이 값이 없으면 application.yml 의 false 가 그대로 남아 스키마가 만들어지지
+      # 않고, 위 validate 가 실패해 앱이 뜨지 않는다.
+      #
+      # 마이그레이션 SQL 은 Oracle 문법이라 운영에서만 켠다. 로컬/CI 는 H2 라
+      # Flyway 를 끄고 ddl-auto 로 스키마를 만든다.
+      flyway:
+        enabled: true
       h2:
         console:
           enabled: false
@@ -133,13 +142,32 @@ output "backend_prod_yml" {
       expiration: 3600000
 
     # WAS 부팅 스크립트가 SSM 에서 받아 컨테이너에 읽기 전용으로 마운트한다.
+    #
+    # 클래스패스가 아니라 파일시스템 경로이므로 file: 접두사가 반드시 필요하다.
+    # 빠지면 앱이 jar 안에서 키를 찾다가 실패하고, prod 는 기동을 거부한다.
     firebase:
-      credentials-path: /run/secrets/firebase.json
+      credentials-path: file:/run/secrets/firebase.json
 
     app:
       s3:
         bucket: ${aws_s3_bucket.media.id}
         prefix: uploads
         presign-ttl: 5m
+
+      # 이 줄이 없으면 기본값 mock 이 남아 운영에서도 푸시가 로그로만 남는다.
+      # 반대로 firebase 로 켠 뒤 SSM 에 키(/kidhackapp/app/firebase-key)가 없으면
+      # 컨테이너가 뜨지 않는다 — 조용히 죽는 것보다 낫다고 보고 그렇게 뒀다.
+      # → 키를 SSM 에 먼저 넣고, 그다음 APPLICATION_PROD_YML 을 갱신할 것.
+      push:
+        provider: firebase
+
+      # STOMP 의 SimpleBroker 는 브로커 프로세스가 아니라 각 JVM 힙 안의 구독자
+      # 목록이다. WAS 가 2 대라 같은 방의 두 사람이 서로 다른 인스턴스에 붙으면
+      # 한쪽은 메시지를 받지 못한다. redis 로 두면 발행을 Redis 채널로 한 번
+      # 돌려 모든 인스턴스가 자기 구독자에게 전달한다.
+      #
+      # local 이면 지금까지의 동작 그대로다 — 깨지지는 않고 절반만 전달된다.
+      chat:
+        broker: redis
   YAML
 }
