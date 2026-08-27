@@ -20,7 +20,7 @@ exec > /var/log/user-data.log 2>&1
 #
 # ⚠️ IMDS hop limit
 #   compute.tf 에서 2 로 올렸다. WEB 과 달리 WAS 는 앱이 컨테이너 안에서
-#   AWS SDK 를 쓸 예정이기 때문이다(S3 presigned URL 업로드).
+#   AWS SDK 를 쓰기 때문이다(S3 업로드/삭제와 presigned URL 발급).
 #   아래 aws CLI 호출은 전부 호스트에서 하므로 이 스크립트 자체는 1 이어도 된다.
 # ==================================================================
 
@@ -159,48 +159,67 @@ chmod 600 /opt/app/firebase.json
 chown 10001:0 /opt/app/firebase.json
 
 # ------------------------------------------------------------------
-# 업로드 디렉터리 (호스트 볼륨)
+# 업로드 디렉터리는 더 이상 만들지 않는다 (S3 전환 완료).
 #
-# FileStorageService / InquiryFileStorageService 가 상대경로
-# uploads/community, uploads/inquiry 에 쓴다. 이미지의 WORKDIR 이 /app 이므로
-# 컨테이너 안에서는 /app/uploads/... 로 해석된다.
+# 예전에는 /opt/app/uploads 를 호스트에 만들어 컨테이너의 /app/uploads 에
+# 마운트했다. 앱이 상대경로 uploads/community 에 썼기 때문에 이 마운트가 없으면
+# Watchtower 가 컨테이너를 교체할 때마다 업로드 파일이 사라졌다.
+# 다만 WAS 가 2 대라 WAS1 에 올린 파일을 WAS2 가 서빙하지 못하는 문제는
+# 그 방식으로 풀리지 않는 임시 방편이었다.
 #
-# 이 마운트가 없으면 Watchtower 가 컨테이너를 교체할 때마다 업로드 파일이
-# 전부 사라진다. 컨테이너 파일시스템은 휘발성이기 때문이다.
-#
-# ⚠️ 이건 임시 방편이다. WAS 가 2 대라 WAS1 에 올린 파일을 WAS2 가 서빙하지
-#    못하는 문제는 그대로 남는다(요청마다 다른 인스턴스로 간다).
-#    정공법은 S3 전환이며 버킷·IAM·CORS 는 이미 준비되어 있다.
+# 이제 아래 APP_S3_BUCKET 이 채워져 있으면 앱이 S3 에만 쓰므로 이 경로를 아무도
+# 읽지 않는다. 빈 디렉터리를 남겨 두는 것이 오히려 위험하다 — 버킷 이름에 오타가
+# 나거나 값이 비면 앱이 에러 없이 조용히 로컬 디스크 모드로 떨어지고, 그때
+# 마운트가 있으면 "WAS1 에 올린 파일이 WAS2 에서 404" 라는 산발적 증상으로만
+# 드러난다. 마운트가 없으면 재배포 때 바로 티가 난다.
 # ------------------------------------------------------------------
-mkdir -p /opt/app/uploads
-chown -R 10001:0 /opt/app/uploads
 
 # ------------------------------------------------------------------
-# 환경변수로 application.yml 의 로컬 설정(H2 / localhost)을 덮어쓴다.
-# Spring Boot 의 relaxed binding 규칙에 따라
-# SPRING_DATASOURCE_URL -> spring.datasource.url 로 매핑된다.
+# 앱 환경변수
+#
+# ⚠️ 예전에는 이 파일이 운영 설정 전부(Oracle URL, Redis 호스트, S3 버킷 ...)를
+#    들고 있었다. 지금은 그 대부분이 이미지 안의 application-prod.yml 로 갔다.
+#    그 파일은 backend 레포에도 없고 GitHub Secrets 의 APPLICATION_PROD_YML 에
+#    있으며, CD 가 빌드 직전에 복원해 jar 에 넣는다.
+#    아래 SPRING_PROFILES_ACTIVE=prod 가 그 프로파일을 켠다.
+#
+# 여기 남은 것은 "이미지에 구우면 안 되는 값" 뿐이다.
+# 비밀번호를 이미지에 넣으면 CD 가 남기는 sha- 롤백 태그 안에 옛 비밀번호가
+# 영구히 남고, Docker Hub 이미지를 pull 할 수 있는 사람 = DB 에 붙을 수 있는
+# 사람이 된다. 반대로 엔드포인트/계정명은 프라이빗 서브넷이라 새어도 붙지 못한다.
+#
+# ⚠️ 환경변수가 yml 보다 우선순위가 높다. 여기에 SPRING_DATASOURCE_URL 같은
+#    줄을 다시 넣으면 시크릿의 yml 이 아무 에러 없이 무시된다.
+#    비밀이 아닌 값을 바꿀 일이 생기면 backend 레포의 시크릿을 고칠 것.
 #
 # ⚠️ 이 파일은 systemd EnvironmentFile 이 아니라 docker --env-file 로 읽힌다.
 #    Docker 는 따옴표를 벗기지 않고 값의 일부로 취급하므로, 값에 따옴표를
 #    넣지 말 것. 변수 확장도 하지 않으므로 아래 & 나 $ 는 안전하다.
 # ------------------------------------------------------------------
 cat > /opt/app/app.env <<EOF
+# 비밀이 아닌데도 여기 남는 유일한 값. 아래 docker run 의 -p 8080:8080 과
+# 짝이라 인프라 쪽에서 함께 관리하는 편이 맞다.
 SERVER_PORT=8080
 
-# ALB -> Nginx -> NLB -> WAS 로 프록시가 2 단이다.
-# 이 값이 없으면 Spring 이 X-Forwarded-Proto 를 무시해서, ALB 에 HTTPS 를 켰을 때
-# 리다이렉트나 절대 URL 이 http:// 로 생성되어 무한 리다이렉트가 발생한다.
-SERVER_FORWARD_HEADERS_STRATEGY=framework
+# 이미지 안의 application-prod.yml 을 켠다.
+# 이 줄이 없으면 앱이 기본 프로파일로 떠서 H2 인메모리 + localhost Mongo/Redis
+# 로 동작한다. 그것도 "기동 성공" 이라 아무 에러가 없고, 재배포 때 데이터가
+# 통째로 사라지는 형태로만 뒤늦게 드러난다.
+SPRING_PROFILES_ACTIVE=prod
 
-# --- Oracle (NNE 로 전송 암호화, 드라이버가 자동 협상하므로 URL 변경 불필요) ---
-SPRING_DATASOURCE_URL=jdbc:oracle:thin:@//${oracle_endpoint}/${oracle_db_name}
-SPRING_DATASOURCE_USERNAME=${db_username}
+# --- RDS Oracle 비밀번호 ---
+# 나머지 접속 정보(엔드포인트/계정명/드라이버/다이얼렉트)는 prod yml 에 있다.
 SPRING_DATASOURCE_PASSWORD=$DB_PASSWORD
-SPRING_DATASOURCE_DRIVER_CLASS_NAME=oracle.jdbc.OracleDriver
-SPRING_JPA_DATABASE_PLATFORM=org.hibernate.dialect.OracleDialect
-SPRING_H2_CONSOLE_ENABLED=false
+
+# --- 스키마 최초 생성 (평소에는 주석 처리된 상태로 둔다) ---
+# prod yml 은 ddl-auto: validate 라 테이블이 없으면 기동에 실패한다.
+# 빈 DB 에 처음 배포할 때만 아래 줄의 주석을 풀어 띄우고, 테이블이 만들어진
+# 것을 확인한 뒤 다시 주석 처리해서 재기동할 것.
+# 켜 둔 채로 두면 운영 스키마에 자동 DDL 이 계속 나간다.
+#SPRING_JPA_HIBERNATE_DDL_AUTO=update
 
 # --- DocumentDB ---
+# URI 문자열 안에 비밀번호가 박히는 구조라 통째로 여기 남는다.
 # replicaSet=rs0  : DocumentDB 의 레플리카셋 이름은 항상 rs0 고정.
 #                   이걸 붙이면 드라이버가 토폴로지를 발견해 쓰기는 Writer,
 #                   읽기는 readPreference 대로 라우팅한다(페일오버 자동 추종).
@@ -209,32 +228,19 @@ SPRING_H2_CONSOLE_ENABLED=false
 SPRING_DATA_MONGODB_URI=mongodb://${docdb_username}:$DOCDB_PASSWORD@${docdb_endpoint}:27017/kidhack_chat?tls=true&replicaSet=rs0&readPreference=secondaryPreferred&retryWrites=false
 
 # --- JWT ---
-# application.yml 의 jwt.secret 을 덮어쓴다 (relaxed binding: JWT_SECRET -> jwt.secret).
-# 이게 없으면 공개된 로컬 테스트 키로 토큰을 서명하게 된다.
+# prod yml 의 jwt.secret 이 이 환경변수를 플레이스홀더로 참조한다.
+# 값이 없으면 플레이스홀더 해석에 실패해 앱이 아예 뜨지 않는다 —
+# 공개된 로컬 테스트 키로 토큰을 서명하는 것보다 이쪽이 낫다.
 JWT_SECRET=$JWT_SECRET
 
-# --- ElastiCache Redis (전송 암호화 켜져 있으므로 ssl 필수) ---
-SPRING_DATA_REDIS_HOST=${redis_endpoint}
-SPRING_DATA_REDIS_PORT=6379
-SPRING_DATA_REDIS_SSL_ENABLED=true
-
-# --- Firebase ---
-# 절대경로를 주면 FirebaseConfig 가 클래스패스가 아니라 파일시스템에서 읽는다.
-FIREBASE_CREDENTIALS_PATH=/run/secrets/firebase.json
-
-# --- S3 (첨부파일) ---
-# APP_S3_BUCKET -> app.s3.bucket (relaxed binding).
-# 이 값이 비어 있으면 앱은 로컬 디스크에 저장하는 기존 동작을 쓴다.
-# 즉 백엔드가 아직 S3 를 구현하기 전이라도 이 줄은 무해하다.
+# --- AWS SDK ---
+# S3 버킷 이름(app.s3.bucket)은 prod yml 로 갔다. 버킷을 바꾸려면
+# storage.tf 의 var.s3_bucket_name 과 backend 레포의 시크릿을 함께 고칠 것.
+# 한쪽만 바꾸면 앱이 에러 없이 조용히 엉뚱한/없는 버킷을 보게 된다.
 #
-# 미리 넣어두는 이유: user_data 가 바뀌면 user_data_replace_on_change 때문에
-# EC2 가 재생성된다. S3 구현이 머지될 때 이 줄을 추가하면 그때 한 번 더
-# 갈아엎어야 하므로, 값이 확정된 지금 넣어 재생성을 아낀다.
-#
-# AWS_REGION 은 SDK 표준 환경변수다. 없으면 SDK 가 IMDS 로 리전을 조회하는데
-# (컨테이너 안이라 hop 2 가 필요하고 이미 그렇게 설정되어 있지만) 왕복이 한 번
-# 줄고 동작이 명시적이 된다.
-APP_S3_BUCKET=${bucket}
+# 리전은 SDK 표준 환경변수라 여기 남긴다. 없으면 SDK 가 IMDS 로 리전을
+# 조회하는데(컨테이너 안이라 hop 2 가 필요하고 이미 그렇게 설정되어 있지만)
+# 왕복이 한 번 줄고 동작이 명시적이 된다.
 AWS_REGION=${region}
 EOF
 
@@ -277,7 +283,6 @@ ExecStart=/usr/bin/docker run -d \\
   -p 8080:8080 \\
   --env-file /opt/app/app.env \\
   -v /opt/app/firebase.json:/run/secrets/firebase.json:ro \\
-  -v /opt/app/uploads:/app/uploads \\
   -l com.centurylinklabs.watchtower.enable=true \\
   ${was_image}:latest
 Restart=on-failure

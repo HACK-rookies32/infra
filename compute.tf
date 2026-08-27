@@ -107,17 +107,17 @@ locals {
   # WAS 도 WEB 과 같은 방식이다. S3 에서 jar 를 받지 않고 Docker Hub 이미지를
   # 받아 컨테이너로 뜬 뒤, 갱신은 Watchtower 가 처리한다.
   #
-  # bucket 은 jar 다운로드용이 아니라 첨부파일 업로드용으로 넘긴다.
-  # 앱이 아직 S3 를 구현하기 전이라 지금은 쓰이지 않지만, user_data 가 바뀌면
-  # EC2 가 재생성되므로 값이 확정된 지금 미리 넣어 재생성을 한 번 아낀다.
+  # ⚠️ 넘기는 값이 예전보다 훨씬 적다.
+  #    Oracle 엔드포인트/계정명, Redis 엔드포인트, S3 버킷 이름은 이제 앱
+  #    이미지 안의 application-prod.yml 이 들고 있다(backend 레포의 GitHub
+  #    Secrets: APPLICATION_PROD_YML). user_data 에는 이미지에 구우면 안 되는
+  #    값 — 비밀번호/서명키 — 만 남긴다. 자세한 근거는 템플릿 주석 참고.
+  #
+  #    그래서 RDS/Redis 에 대한 암묵적 의존이 사라졌다. 생성 순서를 유지하려고
+  #    아래 aws_instance.was 에 depends_on 을 명시해 둔다.
   was_user_data = templatefile("${path.module}/templates/was_user_data.sh.tftpl", {
-    bucket               = aws_s3_bucket.media.id
     region               = var.aws_region
-    oracle_endpoint      = aws_db_instance.oracle.endpoint
-    oracle_db_name       = var.oracle_db_name
     docdb_endpoint       = aws_docdb_cluster.mongo.endpoint
-    redis_endpoint       = aws_elasticache_replication_group.redis.primary_endpoint_address
-    db_username          = var.db_username
     docdb_username       = var.docdb_username
     db_password_param    = aws_ssm_parameter.db_password.name
     docdb_password_param = aws_ssm_parameter.docdb_password.name
@@ -146,7 +146,10 @@ resource "aws_instance" "web" {
   vpc_security_group_ids = [aws_security_group.web_sg.id]
   iam_instance_profile   = aws_iam_instance_profile.ec2_profile.name
 
-  user_data                   = local.web_user_data
+  # WAS 와 같은 이유로 압축해서 넘긴다 (aws_instance.was 의 주석 참고).
+  # WEB 템플릿은 아직 16 KiB 아래지만 여유가 5 KB 남짓이라, 주석 몇 줄만 더
+  # 붙으면 같은 자리에서 멈춘다. 미리 맞춰 둔다.
+  user_data_base64            = base64gzip(local.web_user_data)
   user_data_replace_on_change = true
 
   # IMDSv2 강제 (locals.imds_v2 주석 참고)
@@ -277,8 +280,29 @@ resource "aws_instance" "was" {
   vpc_security_group_ids = [aws_security_group.was_sg.id]
   iam_instance_profile   = aws_iam_instance_profile.ec2_profile.name
 
-  user_data                   = local.was_user_data
+  # ⚠️ user_data 가 아니라 user_data_base64 + base64gzip 이다.
+  #
+  # EC2 의 user_data 상한은 16 KiB(16384 B)인데 이 템플릿은 주석까지 합쳐
+  # 그 선을 넘었다. 평문으로 넘기면 apply 가 이렇게 멈춘다:
+  #   expected length of user_data to be in the range (0 - 16384)
+  #
+  # cloud-init 은 user_data 앞머리의 gzip 매직바이트를 보고 스스로 압축을
+  # 풀기 때문에, 압축해서 넘겨도 인스턴스가 받는 스크립트는 완전히 같다.
+  # 주석이 많아 압축률이 높고(16 KB -> 4 KB 안팎) 한동안 여유가 생긴다.
+  #
+  # 상한은 "압축을 푼 뒤" 가 아니라 실제로 전송되는 바이트 기준이므로,
+  # 주석을 지워 줄이는 것보다 이쪽이 낫다 — 주석이 이 스크립트에서
+  # 가장 값나가는 부분이다.
+  user_data_base64            = base64gzip(local.was_user_data)
   user_data_replace_on_change = true
+
+  # user_data 가 더 이상 RDS/Redis 엔드포인트를 참조하지 않아(위 locals 주석)
+  # 암묵적 의존이 끊겼다. 명시하지 않으면 WAS 가 DB 보다 먼저 만들어져,
+  # 컨테이너가 접속 실패로 재시작만 반복하는 구간이 길어진다.
+  depends_on = [
+    aws_db_instance.oracle,
+    aws_elasticache_replication_group.redis,
+  ]
 
   # IMDSv2 강제 (locals.imds_v2 주석 참고)
   metadata_options {

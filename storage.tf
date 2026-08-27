@@ -7,9 +7,13 @@
 # 손으로 비우는 것으로는 해결되지 않는다. 이 옵션이 이전 버전까지 전부 지운다.
 #
 # ⚠️ 반대급부: destroy 시 버킷 안의 모든 객체가 사라진다.
-#    지금은 artifacts/ (dist.tar.gz, jar) 뿐이라 재업로드하면 그만이지만,
-#    사용자 업로드 파일이 같은 버킷에 쌓이기 시작하면 그것까지 함께 날아간다.
-#    그 시점에는 버킷을 둘로 나누는 것이 맞다:
+#    이제 uploads/ 아래에 사용자 첨부가 실제로 쌓이므로(backend app.s3.prefix),
+#    terraform destroy 는 게시글·문의 첨부를 전부 지우는 명령이 되었다.
+#    라이프사이클도 버저닝도 이건 막아주지 못한다 — force_destroy 는 이전 버전까지
+#    지우기 때문이다.
+#
+#    지금은 비용 때문에 환경을 통째로 내렸다 올리는 주기가 있어 이 설정을 유지한다.
+#    상시 운영으로 넘어가면 버킷을 둘로 나눌 것:
 #      - artifacts 버킷 : force_destroy = true (지금 이 설정)
 #      - media 버킷     : 사용자 데이터. prevent_destroy 또는 Terraform 밖으로
 resource "aws_s3_bucket" "media" {
@@ -21,6 +25,63 @@ resource "aws_s3_bucket_versioning" "media_ver" {
   bucket = aws_s3_bucket.media.id
   versioning_configuration {
     status = "Enabled"
+  }
+}
+
+# ==========================================
+# 라이프사이클 — 지운 파일이 영원히 남지 않게 한다
+# ==========================================
+# 버저닝이 켜져 있으므로 앱이 DeleteObject 를 불러도 실제 데이터는 사라지지 않고
+# "이전 버전" 으로 남는다. 규칙이 없으면 사용자가 지운 첨부가 전부 그대로 쌓이고
+# 요금도 계속 나간다. 게시글/문의 삭제 시 앱이 첨부를 지우기 시작했으므로
+# (backend FileStorageService#delete) 이 규칙이 짝으로 필요하다.
+#
+# 반대로 즉시 완전 삭제하지 않는 이유는 실수를 되돌릴 창을 남기기 위해서다.
+# 백엔드의 게시글 삭제에는 작성자 검증이 없는 알려진 결함이 있어([VULN-11]),
+# 30 일 안에는 이전 버전을 복원할 수 있어야 한다.
+resource "aws_s3_bucket_lifecycle_configuration" "media" {
+  bucket = aws_s3_bucket.media.id
+
+  # 버저닝이 켜지기 전에 규칙이 붙으면 noncurrent_version_* 이 의미를 갖지 못한다.
+  depends_on = [aws_s3_bucket_versioning.media_ver]
+
+  # 지워진(또는 덮어써진) 이전 버전은 30 일 뒤 완전 삭제.
+  rule {
+    id     = "expire-noncurrent-versions"
+    status = "Enabled"
+
+    # 프로바이더 v5 는 prefix 든 filter 든 하나를 반드시 요구한다.
+    # 버킷 전체에 적용하려면 빈 filter 를 명시한다.
+    filter {}
+
+    noncurrent_version_expiration {
+      noncurrent_days = 30
+    }
+  }
+
+  # 이전 버전이 모두 만료된 뒤 홀로 남은 삭제 마커를 치운다.
+  # 남겨두면 ListObjects 결과만 느리게 만들고 아무 쓸모가 없다.
+  rule {
+    id     = "expire-delete-markers"
+    status = "Enabled"
+    filter {}
+
+    expiration {
+      expired_object_delete_marker = true
+    }
+  }
+
+  # 끊긴 멀티파트 업로드 조각 정리.
+  # 브라우저가 S3 로 직접 올리는 구조라 업로드가 중간에 끊기는 일이 늘어난다.
+  # 이 조각들은 객체 목록에 보이지 않으면서 스토리지 요금은 그대로 나간다.
+  rule {
+    id     = "abort-incomplete-multipart-uploads"
+    status = "Enabled"
+    filter {}
+
+    abort_incomplete_multipart_upload {
+      days_after_initiation = 7
+    }
   }
 }
 

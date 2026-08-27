@@ -29,6 +29,11 @@ resource "aws_iam_policy" "s3_access" {
       Action = [
         "s3:GetObject",
         "s3:PutObject",
+        # 게시글/문의를 지울 때 앱이 첨부 실물도 지운다.
+        # 버저닝이 켜져 있어 이 권한으로는 삭제 마커만 남길 수 있고 이전 버전을
+        # 영구 삭제할 수는 없다(그건 s3:DeleteObjectVersion 이며 주지 않는다).
+        # 실제 정리는 storage.tf 의 라이프사이클 규칙이 한다.
+        "s3:DeleteObject",
         "s3:ListBucket"
       ]
       Resource = [
