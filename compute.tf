@@ -97,6 +97,7 @@ locals {
     region                   = var.aws_region
     nlb_dns                  = aws_lb.int_nlb.dns_name
     dns_resolver             = local.vpc_dns
+    timezone                 = var.timezone
     dockerhub_image          = var.dockerhub_image
     dockerhub_username       = var.dockerhub_username
     dockerhub_token_param    = aws_ssm_parameter.dockerhub_token.name
@@ -119,6 +120,7 @@ locals {
     region               = var.aws_region
     docdb_endpoint       = aws_docdb_cluster.mongo.endpoint
     docdb_username       = var.docdb_username
+    timezone             = var.timezone
     db_password_param    = aws_ssm_parameter.db_password.name
     docdb_password_param = aws_ssm_parameter.docdb_password.name
     jwt_secret_param     = aws_ssm_parameter.jwt_secret.name

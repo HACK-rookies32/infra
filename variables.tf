@@ -227,3 +227,22 @@ variable "docdb_password" {
   type      = string
   sensitive = true
 }
+
+# EC2 호스트와 그 위의 컨테이너가 함께 쓸 타임존.
+#
+# 호스트는 timedatectl 로, 컨테이너는 TZ 환경변수와 /etc/localtime 마운트로
+# 같은 값을 받는다(templates/*_user_data.sh.tftpl 참고). 한쪽만 바꾸면
+# nginx access log / Spring Boot 로그 / journalctl 의 타임스탬프가 9 시간씩
+# 어긋나 장애 시각을 맞춰 보기 어려워진다.
+#
+# ⚠️ 이건 "표시" 타임존일 뿐이다. DB 에 저장되는 값의 타임존은 별개 문제다.
+#   Oracle 컬럼 타입과 앱의 시간대 처리가 따로 정해지며, 그쪽은 backend
+#   레포의 application-prod.yml 소관이다.
+#
+# UTC 로 통일하고 싶으면 "UTC" 로 두면 된다. 인스턴스 교체가 필요한 값은
+# 아니지만 user_data 가 바뀌므로 apply 시 EC2 4 대가 재생성된다
+# (compute.tf 의 user_data_replace_on_change = true).
+variable "timezone" {
+  type    = string
+  default = "Asia/Seoul"
+}
