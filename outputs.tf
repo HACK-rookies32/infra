@@ -66,11 +66,22 @@ output "docdb_reader_endpoint" {
 # 셋 다 "apply 는 성공했는데 앱만 이상한" 형태로 드러나서 원인 찾기가 나쁘다.
 #
 # 등록 (backend 레포에 대한 권한 필요):
-#   terraform output -raw backend_prod_yml | base64 -w0 | \
-#     gh secret set APPLICATION_PROD_YML --repo HACK-rookies32/backend
+#   ( set -o pipefail
+#     terraform output -raw backend_prod_yml | tr -d '\r' | base64 -w0 > /tmp/prod.b64 ) \
+#     && test -s /tmp/prod.b64 \
+#     && gh secret set APPLICATION_PROD_YML --repo HACK-rookies32/backend < /tmp/prod.b64
+#   rm -f /tmp/prod.b64
 #
-# 확인:
-#   terraform output -raw backend_prod_yml
+# 한 줄 파이프로 이어 붙이지 말 것. state 가 비어 있으면 terraform output 이
+# 실패하는데, pipefail 이 없으면 뒤의 base64 가 빈 문자열을 성공으로 넘기고
+# gh 가 그 빈 값을 등록하면서 성공 메시지까지 찍는다. 실제로 한 번 당했다.
+# test -s 는 그 빈 값이 시크릿까지 가는 것을 막는 마지막 방어선이다.
+#
+# tr -d '\r' 은 윈도우용이다. 윈도우 terraform 은 줄바꿈을 CRLF 로 내보내서
+# 리눅스에서 만든 것과 바이트가 달라진다(앱은 뜨지만 재현이 안 된다).
+#
+# 확인 (사이즈가 1000 바이트 미만이면 뭔가 잘못된 것이다):
+#   terraform output -raw backend_prod_yml | tr -d '\r' | wc -c
 #
 # ⚠️ 여기에는 비밀번호/서명키가 일부러 들어 있지 않다. 아래 $${...} 는
 #    Terraform 이스케이프라 렌더링 결과에는 ${...} 로 남고, WAS 부팅
