@@ -2,6 +2,24 @@
 # 2. Security Groups
 # ==========================================
 
+# 배스천이 들어갈 대역. WEB / WAS 의 22 번은 이 대역에서만 받는다.
+#
+# 왜 배스천 SG 를 참조(security_groups = [...])하지 않고 CIDR 인가:
+#   배스천은 개발 기간에만 콘솔에서 띄웠다 지울 물건이라 Terraform 관리 밖에
+#   둔다. SG 를 여기서 만들어 배스천에 붙이면 그 SG 가 배스천 ENI 에 묶여
+#   destroy 가 DependencyViolation 으로 막힌다. CIDR 이면 Terraform 은
+#   배스천의 존재 자체를 모르므로 수명주기가 얽히지 않는다.
+#
+# ⚠️ 대신 정밀도를 잃는다. 이 대역(public_2a)에 올라오는 인스턴스는 무엇이든
+#   WEB / WAS 의 22 번을 통과한다. public_2a 에 배스천 외의 것을 두게 되면
+#   그때는 배스천 전용 SG 를 만들어 참조 방식으로 바꾸는 편이 낫다.
+#
+# public_2c 는 일부러 뺐다. 배스천 한 대만 쓸 예정이라 여는 만큼 손해다.
+# 2c 에 배스천을 세우게 되면 "192.168.1.0/24" 를 여기에 추가하면 된다.
+locals {
+  bastion_cidrs = ["192.168.0.0/24"] # network.tf 의 public_2a
+}
+
 resource "aws_security_group" "ext_alb_sg" {
   name   = "kidhackapp-ext-alb-sg"
   vpc_id = aws_vpc.main.id
@@ -40,6 +58,15 @@ resource "aws_security_group" "web_sg" {
     protocol        = "tcp"
     security_groups = [aws_security_group.ext_alb_sg.id]
   }
+
+  # 배스천 경유 SSH (locals.bastion_cidrs 주석 참고)
+  ingress {
+    from_port   = 22
+    to_port     = 22
+    protocol    = "tcp"
+    cidr_blocks = local.bastion_cidrs
+  }
+
   egress {
     from_port   = 0
     to_port     = 0
@@ -74,6 +101,18 @@ resource "aws_security_group" "was_sg" {
     protocol    = "tcp"
     cidr_blocks = ["192.168.10.0/24", "192.168.11.0/24"] # network.tf 의 web_private_2a / 2c
   }
+
+  # 배스천 경유 SSH (locals.bastion_cidrs 주석 참고)
+  #
+  # WAS 는 web_private 대역에서만 8080 을 받지만, 22 번은 배스천 대역에서
+  # 직접 받는다. 배스천 -> WEB -> WAS 로 두 번 건너뛰지 않기 위함이다.
+  ingress {
+    from_port   = 22
+    to_port     = 22
+    protocol    = "tcp"
+    cidr_blocks = local.bastion_cidrs
+  }
+
   egress {
     from_port   = 0
     to_port     = 0

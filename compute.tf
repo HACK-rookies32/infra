@@ -148,6 +148,14 @@ resource "aws_instance" "web" {
   vpc_security_group_ids = [aws_security_group.web_sg.id]
   iam_instance_profile   = aws_iam_instance_profile.ec2_profile.name
 
+  # 배스천 경유 SSH 용 키페어. 콘솔에서 만든 것의 이름만 참조한다.
+  #
+  # var.ssh_key_name 이 "" 면 null 을 넘겨 키를 아예 안 붙인다. key_name 에
+  # 빈 문자열을 그대로 주면 apply 가 InvalidKeyPair.NotFound 로 실패하므로
+  # 삼항이 필요하다 — 여기서 null 은 "속성 미지정"과 같은 뜻이다.
+  # 값이 바뀌면 인스턴스가 재생성된다(variables.tf 의 ssh_key_name 주석 참고).
+  key_name = var.ssh_key_name != "" ? var.ssh_key_name : null
+
   # WAS 와 같은 이유로 압축해서 넘긴다 (aws_instance.was 의 주석 참고).
   # WEB 템플릿은 아직 16 KiB 아래지만 여유가 5 KB 남짓이라, 주석 몇 줄만 더
   # 붙으면 같은 자리에서 멈춘다. 미리 맞춰 둔다.
@@ -281,6 +289,9 @@ resource "aws_instance" "was" {
   subnet_id              = each.value
   vpc_security_group_ids = [aws_security_group.was_sg.id]
   iam_instance_profile   = aws_iam_instance_profile.ec2_profile.name
+
+  # WEB 과 같은 키페어를 쓴다 (aws_instance.web 의 key_name 주석 참고).
+  key_name = var.ssh_key_name != "" ? var.ssh_key_name : null
 
   # ⚠️ user_data 가 아니라 user_data_base64 + base64gzip 이다.
   #

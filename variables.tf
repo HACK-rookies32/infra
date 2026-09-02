@@ -246,3 +246,28 @@ variable "timezone" {
   type    = string
   default = "Asia/Seoul"
 }
+
+# 배스천을 통해 WEB / WAS 에 SSH 로 붙을 때 쓸 키페어 "이름".
+#
+# 키페어 자체는 Terraform 이 만들지 않는다. 콘솔(또는 CLI)에서 미리 만들어 둔
+# 것의 이름만 여기에 적는다. 이유는 두 가지다:
+#   - tls_private_key 로 apply 때 생성하면 개인키 PEM 전문이 tfstate 에
+#     평문으로 박힌다. 이 프로젝트는 backend 블록이 없어 state 가 로컬 파일로
+#     남으므로 더 나쁘다.
+#   - 배스천은 개발 기간에만 콘솔에서 띄웠다 지울 물건이라, 키페어까지
+#     Terraform 이 쥐고 있으면 destroy 수명주기가 서로 얽힌다.
+#
+# ⚠️ 이 값을 바꾸면(빈 문자열 <-> 이름 포함) EC2 4 대가 전부 재생성된다.
+#   key_name 은 aws_instance 의 ForceNew 속성이라 in-place 수정이 안 된다.
+#   컨테이너가 다시 뜨고 프라이빗 IP 도 바뀌니 배포 타이밍을 잡고 적용할 것.
+#
+# ⚠️ 여기 적은 이름의 키페어가 실제로 존재하지 않으면 apply 가
+#   InvalidKeyPair.NotFound 로 실패한다. 리전(var.aws_region)도 같아야 한다.
+#
+# 빈 문자열이면 키를 아예 붙이지 않는다(compute.tf 의 삼항 참고). 배스천을
+# 걷어낸 뒤에는 다시 "" 로 되돌려 SSH 경로를 없애는 것을 기본으로 삼는다.
+# 키 없이도 SSM Session Manager 로 붙을 수 있다(iam.tf 의 ssm_attach).
+variable "ssh_key_name" {
+  type    = string
+  default = "kidhackapp-key"
+}
