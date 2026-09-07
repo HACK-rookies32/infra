@@ -28,26 +28,25 @@ locals {
   # 값을 넣으면 그것으로 고정되어 apply 때 인스턴스가 갈리지 않는다.
   ubuntu_ami = var.ubuntu_ami_id != "" ? var.ubuntu_ami_id : data.aws_ami.ubuntu.id
 
-  # IMDSv2 강제 설정. EC2 4 대가 모두 같은 값을 쓰므로 여기서 한 번만 정의한다.
+  # IMDS 설정. EC2 4 대가 모두 같은 값을 쓰므로 여기서 한 번만 정의한다.
   #
-  # 기본값(optional)이면 IMDSv1 이 살아 있어, 토큰 없이 단순 GET 한 번으로
-  # 인스턴스 IAM 역할의 임시 자격증명을 읽을 수 있다. 즉 앱에 SSRF 취약점이
-  # 하나만 있어도 S3 와 SSM 파라미터 권한이 그대로 유출된다.
-  # 비밀번호를 user_data 에서 SSM 으로 뺀 것과 같은 맥락의 조치다.
+  # ⚠️ http_tokens = "optional" (IMDSv1 허용) — 모의해킹 실습 타깃으로 의도한 설정이다.
+  #   optional 이면 토큰 없는 단순 GET 한 번으로 인스턴스 IAM 역할의 임시 자격증명을
+  #   읽을 수 있다. 즉 앱의 SSRF 취약점 하나로 S3·SSM 파라미터 권한(그리고 SSM 에
+  #   든 DB 비밀번호·JWT 키)이 그대로 유출되는 시연이 성립한다.
+  #   운영 전환 시에는 반드시 "required" 로 되돌릴 것. 이 변경은 인스턴스 교체 없이
+  #   in-place 로 적용된다(user_data 와 달리 재생성 안 됨).
   #
   # hop_limit = 2 : 부팅 스크립트의 awscli 는 호스트에서 도니 1 이면 충분하지만,
   #   컨테이너 안에서 IMDS(169.254.169.254)를 호출하면 브리지 네트워크를 거쳐
   #   홉이 하나 늘어 1 로는 응답을 못 받는다.
   #   WAS 앱이 S3 presigned URL 을 만들려면 컨테이너 안에서 AWS SDK 가
   #   인스턴스 역할 자격증명을 읽어야 하므로(storage.tf 의 CORS 설정이 전제하는
-  #   그 기능이다) 2 가 필요하다.
-  #
-  #   2 가 1 보다 약한 것은 맞다. 다만 IMDSv1 을 끈 상태(http_tokens=required)라
-  #   토큰 없는 단순 GET 은 여전히 막히고, 늘어나는 것은 "컨테이너 한 겹 안에서도
-  #   호출 가능" 까지다. 이 인스턴스에서 도는 컨테이너는 우리 앱뿐이다.
+  #   그 기능이다) 2 가 필요하다. IMDSv1 이 열린 지금은 컨테이너 안에서도
+  #   토큰 없이 자격증명을 읽을 수 있어, 실습 관점에서 공격 표면이 더 넓어진다.
   imds_v2 = {
     http_endpoint               = "enabled"
-    http_tokens                 = "required"
+    http_tokens                 = "optional"
     http_put_response_hop_limit = 2
   }
 
