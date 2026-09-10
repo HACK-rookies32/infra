@@ -391,3 +391,61 @@ docker run -d \
   -e WATCHTOWER_LABEL_ENABLE=true \
   -e TZ=${timezone} \
   ${watchtower_image}
+
+# ------------------------------------------------------------------
+# kidhack 컨테이너 감시(watchdog)
+#
+# 왜 필요한가:
+#   kidhack.service 는 Type=oneshot + RemainAfterExit=yes 라, "docker run 명령"
+#   이 성공하면 systemd 는 그 뒤 컨테이너의 생사를 더 이상 보지 않는다.
+#   실제로 한 번, watchtower 가 이미지를 교체한 뒤 컨테이너가 통째로 사라졌는데도
+#   systemd 는 active(exited) 로 정상이라 믿고 아무것도 하지 않아, WAS 한 대가
+#   며칠간 죽어 있었다. --restart unless-stopped 는 "컨테이너가 존재할 때" 만
+#   유효하므로 이 경우(컨테이너 자체가 없음)를 못 잡는다.
+#
+# 무엇을 하는가:
+#   1 분마다 kidhack 컨테이너의 "존재 여부" 만 본다. 없으면 유닛을 재기동한다.
+#   존재하는데 재시작 루프를 도는 경우(=이미지가 깨진 경우)는 일부러 건드리지
+#   않는다 — 그건 watchdog 이 가려 버리면 안 되는 별개의 배포 실패 신호이고,
+#   --restart 정책이 이미 재시도하고 있다.
+#
+#   "not running" 이 아니라 "not exists" 를 기준으로 삼는 이유는 watchtower 의
+#   교체 창(stop→start, 수 초)과 부딪혀 정상 배포를 방해하지 않기 위해서다.
+# ------------------------------------------------------------------
+cat > /usr/local/bin/kidhack-watchdog.sh <<'SH'
+#!/bin/bash
+# kidhack 컨테이너가 아예 없을 때만 유닛을 다시 돌린다.
+if ! docker inspect kidhack >/dev/null 2>&1; then
+  echo "$(date -Is) kidhack 컨테이너 없음 → systemctl restart kidhack"
+  systemctl restart kidhack
+fi
+SH
+chmod +x /usr/local/bin/kidhack-watchdog.sh
+
+cat > /etc/systemd/system/kidhack-watchdog.service <<'UNIT'
+[Unit]
+Description=kidhack container watchdog
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/kidhack-watchdog.sh
+UNIT
+
+cat > /etc/systemd/system/kidhack-watchdog.timer <<'UNIT'
+[Unit]
+Description=Run kidhack watchdog every minute
+
+[Timer]
+# 부팅 직후에는 kidhack.service 가 아직 이미지를 받는 중일 수 있어 5 분 뒤 시작.
+OnBootSec=5min
+OnUnitActiveSec=1min
+AccuracySec=10s
+
+[Install]
+WantedBy=timers.target
+UNIT
+
+systemctl daemon-reload
+systemctl enable --now kidhack-watchdog.timer
