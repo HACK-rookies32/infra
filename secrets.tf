@@ -79,3 +79,28 @@ resource "aws_ssm_parameter" "firebase_key" {
   type        = "SecureString"
   value       = var.firebase_credentials_json
 }
+
+# 카드번호 저장 필드암호화(AES-256) 키.
+#
+# 이 값이 없으면 FieldEncryptionKey 가 기동할 때마다 난수 키를 새로 만든다.
+# 그런데 앱은 그 상태로도 정상 기동하므로 아무 에러가 나지 않고, WAS 2 대가
+# 서로 다른 키를 들게 된다. 그러면 A 에 등록한 카드를 B 가 못 열어
+# GET /wallet/cards 가 간헐적으로 500 이 나고, 재배포할 때마다 그때까지
+# 저장된 카드가 통째로 복호 불가가 된다.
+#
+# jwt_secret 과 같은 이유로 사람이 값을 정하지 않는다. openssl 로 만들어
+# 시크릿에 손으로 넣으면 (1) 32 바이트인지 사람이 검증해야 하고 (2) GitHub
+# Secret 은 쓰기 전용이라 되읽을 수 없어, 다음에 prod yml 을 재생성할 때
+# 키를 복원할 방법이 없다. 그 순간 기존 카드가 전부 날아간다.
+#
+# random_bytes 는 한 번 만들어지면 state 에 남고 이후 apply 에서 재생성되지
+# 않는다. "키는 절대 바꾸지 않는다" 를 사람의 주의력이 아니라 도구로 강제하는
+# 것이 이 리소스의 요점이다. 값을 확인해야 하면
+# `terraform output -raw backend_prod_yml` 에 렌더링된 것을 본다.
+#
+# ⚠️ 이 리소스를 지우거나 이름을 바꾸면 다음 apply 에서 새 키가 만들어진다.
+#    그 시점에 저장돼 있던 카드는 전부 복호 불가가 된다.
+resource "random_bytes" "card_storage_key" {
+  # AES-256. FieldEncryptionKey 는 32 바이트가 아니면 기동을 거부한다.
+  length = 32
+}
