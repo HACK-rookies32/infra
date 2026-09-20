@@ -271,3 +271,46 @@ variable "ssh_key_name" {
   type    = string
   default = "kidhackapp-key"
 }
+
+# ============================================================================
+# [모의해킹 실습] ELB confused-deputy MITM 랩 (mitm_lab.tf) 변수
+#   토글 기반. 기본 OFF(미생성). ON 하려면 팀이 핸들러 zip / 노드 AMI 를 함께
+#   제공해야 한다(각각 precondition 으로 강제). 랩 성격·체인·범위는 mitm_lab.tf
+#   상단 주석 참고.
+# ============================================================================
+
+variable "enable_mitm_lab" {
+  description = "ELB confused-deputy MITM 랩(§A Lambda/IAM + §B 수신노드/SG) 생성 토글. false 면 아무것도 생성하지 않음."
+  type        = bool
+  default     = false
+}
+
+variable "deputy_zip_path" {
+  description = "kidhack-elb-deputy Lambda 핸들러 zip 경로(팀 제공). enable_mitm_lab=true 면 필수(mitm_lab.tf precondition)."
+  type        = string
+  default     = ""
+}
+
+variable "deputy_handler" {
+  description = "Lambda 핸들러 진입점(런타임 언어에 맞출 것)."
+  type        = string
+  default     = "index.handler"
+}
+
+variable "deputy_runtime" {
+  description = "Lambda 런타임."
+  type        = string
+  default     = "python3.12"
+}
+
+variable "mitm_node_ami" {
+  description = "MITM 수신 노드 AMI(팀 제공 역프록시 이미지, 기존 플릿과 아키텍처 일치). enable_mitm_lab=true 면 필수(mitm_lab.tf precondition)."
+  type        = string
+  default     = ""
+}
+
+variable "mitm_node_instance_type" {
+  description = "MITM 수신 노드 인스턴스 타입."
+  type        = string
+  default     = "t3.small"
+}
