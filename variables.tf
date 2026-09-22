@@ -86,6 +86,25 @@ variable "ubuntu_ami_id" {
   default = ""
 }
 
+# Docker Engine 버전 핀 (WEB / WAS 4대 공통, 상시 적용).
+#
+# 예전에는 공식 저장소의 최신(unpinned) docker-ce 를 깔았다. 지금은 이 버전으로
+# 고정한다. 모의해킹 실습의 Docker AuthZ 플러그인(enable_docker_authz_lab)이
+# 특정 데몬 API 세대를 전제로 하고, latest 로 두면 Docker 가 새 버전을 내는 순간
+# 플러그인/정책 동작이 조용히 어긋날 수 있기 때문이다.
+#
+# ⚠️ 이 값을 바꾸면 user_data 가 바뀌어 EC2 4대가 전부 재생성된다
+#    (compute.tf 의 user_data_replace_on_change = true).
+#
+# ⚠️ apt 의 "정확한" 패키지 버전 문자열(epoch·suffix 포함, 예:
+#    5:29.3.0-1~ubuntu.22.04~jammy)은 릴리스마다 바뀐다. 부팅 스크립트는 이 값을
+#    apt-cache madison 결과에서 찾아 매칭하므로, 여기에는 x.y.z 만 적으면 된다.
+#    레포에서 이미 내려간 버전을 적으면 부팅이 즉시 FATAL 로 중단된다.
+variable "docker_version" {
+  type    = string
+  default = "29.3.0"
+}
+
 # ------------------------------------------------------------------
 # Docker Hub (WEB / WAS CI/CD)
 # ------------------------------------------------------------------
@@ -313,4 +332,38 @@ variable "mitm_node_instance_type" {
   description = "MITM 수신 노드 인스턴스 타입."
   type        = string
   default     = "t3.small"
+}
+
+# ============================================================================
+# [모의해킹 실습] Docker AuthZ 플러그인 랩
+#   토글 기반. 현재 기본 ON(테스트용) — 평상시/운영 전환 시엔 false 로 되돌릴 것.
+#   ON 이면 WEB/WAS 4대 부팅 스크립트가 OPA AuthZ 플러그인을 설치하고
+#   Docker 데몬(authorization-plugins)에 물린다.
+#
+#   왜 여기가 랩이 되나: 이 호스트에서 Docker 데몬 API 에 닿는 통로는 Watchtower 의
+#   소켓 마운트(-v /var/run/docker.sock) 하나뿐이고(앱 컨테이너는 소켓을 안 문다),
+#   "소켓 = 사실상 root" 다. AuthZ 플러그인은 그 데몬 API 호출을 Rego 정책으로
+#   allow/deny 한다. 실습 대상은 이 소켓 노출과 그 위의 게이팅이다.
+#
+#   경계(mitm_lab 과 동일 철학): 인프라는 골격(버전 핀·플러그인 설치·daemon.json
+#   배선·기본 거부(default deny) + Watchtower CI/CD 허용 베이스라인 정책)만 제공한다.
+#   privileged/호스트 루트 마운트 차단은 이 베이스라인에 이미 들어 있으나, 플러그인
+#   버전별 input 스키마(Method/Path/Body)·정책 경로 확정은 팀 몫이다 — 어긋나면 규칙이
+#   조용히 fail-open 될 수 있다. 부팅 스크립트는 플러그인이 확실히 enabled 일 때만
+#   daemon.json 을 건드려 락아웃을 피한다(templates/*_user_data.sh.tftpl 의 AuthZ 블록 주석 참고).
+#
+#   ⚠️ ON/OFF 를 바꾸면 user_data 가 바뀌어 EC2 4대가 재생성된다.
+#   ⚠️ Docker 버전 핀(var.docker_version)은 이 토글과 무관하게 상시 적용된다.
+# ============================================================================
+
+variable "enable_docker_authz_lab" {
+  description = "Docker AuthZ(OPA) 플러그인을 WEB/WAS 4대에 설치·배선하는 토글. false 면 부팅 스크립트가 AuthZ 블록을 아예 렌더링하지 않음."
+  type        = bool
+  default     = true
+}
+
+variable "opa_authz_plugin" {
+  description = "설치할 OPA Docker authz 관리형 플러그인 참조(태그 포함). 플러그인 버전에 따라 정책 경로/마운트가 다르므로 팀이 확인할 것."
+  type        = string
+  default     = "openpolicyagent/opa-docker-authz-v2:0.9"
 }

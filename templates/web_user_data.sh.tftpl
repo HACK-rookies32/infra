@@ -107,8 +107,9 @@ chronyc tracking
 timedatectl status
 
 # ------------------------------------------------------------------
-# Docker (공식 저장소)
+# Docker (공식 저장소) — 버전 고정: ${docker_version}
 # Ubuntu 기본 저장소의 docker.io 는 버전이 낡아 공식 저장소를 쓴다.
+# CVE-2026-34040 실습이 특정 데몬 API 세대(29.3.x)를 전제하므로 latest 대신 고정한다.
 # ------------------------------------------------------------------
 install -m 0755 -d /etc/apt/keyrings
 curl -fsSL https://download.docker.com/linux/ubuntu/gpg |
@@ -120,7 +121,23 @@ https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo $VERSION_CO
   > /etc/apt/sources.list.d/docker.list
 
 apt_retry update
-apt_retry install -y docker-ce docker-ce-cli containerd.io
+
+# madison 출력: "docker-ce | 5:29.3.0-1~ubuntu.22.04~jammy | <repo>" — 세 번째 필드가
+# apt 에 넣을 정확한 버전 문자열이다. 버전 경계를 위해 앞뒤 구분자([:~-]/[-~])까지 매칭.
+DOCKER_PKG_VERSION="$(apt-cache madison docker-ce \
+  | awk -v v="${docker_version}" '$3 ~ ("[:~-]" v "[-~]") {print $3; exit}')"
+if [ -z "$DOCKER_PKG_VERSION" ]; then
+  echo "FATAL: docker-ce ${docker_version} 를 apt 레포에서 찾지 못했다. 사용 가능한 버전:"
+  apt-cache madison docker-ce | awk '{print $3}'
+  exit 1
+fi
+echo "pinning docker-ce/docker-ce-cli to $DOCKER_PKG_VERSION"
+apt_retry install -y \
+  docker-ce="$DOCKER_PKG_VERSION" \
+  docker-ce-cli="$DOCKER_PKG_VERSION" \
+  containerd.io
+# unattended-upgrades 가 핀을 되돌리지 않게 hold.
+apt-mark hold docker-ce docker-ce-cli
 
 # ------------------------------------------------------------------
 # 컨테이너 로그 로테이션
@@ -145,6 +162,135 @@ DAEMON
 
 systemctl enable docker
 systemctl restart docker
+
+%{ if authz_enabled ~}
+# ==================================================================
+# [모의해킹 실습] Docker AuthZ 플러그인 (OPA) — enable_docker_authz_lab=true 일 때만 렌더링
+# 데몬 API 에 닿는 통로는 Watchtower 소켓 마운트뿐(nginx 컨테이너는 소켓 안 뭄) = 사실상 root.
+# AuthZ 플러그인이 그 API 호출을 Rego 정책으로 allow/deny 한다.
+#
+# ⚠️ 순서(락아웃 방지): install/enable → "확실히 enabled 일 때만" daemon.json 배선 → restart.
+#    반영 후 데몬 비정상이면(정책 미로딩 등) daemon.json 을 자동 롤백한다.
+# ⚠️ 정책 경로/마운트는 플러그인 버전마다 다를 수 있다. 기본 마운트가 /etc/docker/authz 를
+#    못 집으면 `docker plugin set ${opa_authz_plugin} ...` 로 맞출 것(팀 몫. variables.tf 참고).
+# ==================================================================
+mkdir -p /etc/docker/authz
+
+# 베이스라인 정책: 기본 거부(default deny) + Watchtower CI/CD 수명주기만 allow.
+# fleet 안전(부팅 시 docker login·앱/Watchtower 컨테이너 생성·docker info)을 깨지 않으면서,
+# privileged/호스트 루트 바인드 같은 "소켓으로 호스트 장악" 경로만 기본 거부로 남긴다.
+#
+# ⚠️ CVE-2026-34040 데모의 축: 아래 '컨테이너 생성' allow 는 요청 "본문"(Privileged/루트
+#    바인드)을 보고 안전 여부를 판정한다. Docker 29.3.0 은 1MB 초과 본문을 플러그인에
+#    닿기 전에 버리므로, 패딩한 생성 요청은 플러그인 눈에 '본문 없는(=안전한) 생성'으로
+#    보여 이 allow 를 통과하고 데몬은 실제 본문대로 privileged 컨테이너를 만든다(=우회).
+#    경로만으로 create 를 열면 평상시에도 안 막혀 우회할 대상 자체가 없어진다.
+# ⚠️ 부팅 락아웃 주의: 이 정책이 켜진 뒤 스크립트가 이어서 하는 docker login(POST /auth),
+#    앱/Watchtower 컨테이너 생성(POST /containers/create), docker info(GET) 가 전부 아래
+#    allow 에 걸려야 부팅이 진행된다. GET /info 가 막히면 헬스체크 실패로 daemon.json 이
+#    자동 롤백된다(=AuthZ 해제). 아래 규칙은 이 세 가지를 모두 통과시킨다.
+# ⚠️ input.Method/Path/Body 스키마·경로는 플러그인 버전(${opa_authz_plugin})에 맞춰 팀이
+#    검증할 것. 어긋나면 규칙이 조용히 안 걸려(대개 fail-open) 통제가 무력화된다.
+cat > /etc/docker/authz/authz.rego <<'REGO'
+package docker.authz
+
+default allow = false
+
+# 상태 조회/검사/로그, 헬스체크(docker info·version·_ping), Watchtower 폴링 — 전부 GET.
+allow {
+  input.Method == "GET"
+}
+
+# 레지스트리 로그인 (private 이미지 pull 전제)
+allow {
+  input.Method == "POST"
+  contains(input.Path, "/auth")
+}
+
+# 이미지 pull (Watchtower 갱신)
+allow {
+  input.Method == "POST"
+  contains(input.Path, "/images/create")
+}
+
+# 이미지 정리 (WATCHTOWER_CLEANUP=true)
+allow {
+  input.Method == "DELETE"
+  contains(input.Path, "/images/")
+}
+
+# 기존 컨테이너 수명주기: 교체 시 stop→rename→start, watchdog 재기동, 제거 등.
+# id 로 지정된 '이미 존재하는' 컨테이너 대상 동작만. (exec 은 의도적으로 미포함=거부)
+allow {
+  input.Method == "POST"
+  regex.match(`/containers/[^/]+/(start|stop|restart|kill|wait|rename)`, input.Path)
+}
+allow {
+  input.Method == "DELETE"
+  contains(input.Path, "/containers/")
+}
+
+# 컨테이너 '생성'은 본문이 안전할 때만 허용 — 여기가 CVE 우회 지점이다.
+# privileged 도 아니고 호스트 루트('/') 바인드도 없을 때만 통과.
+# (Watchtower 의 /var/run/docker.sock, 앱의 firebase/localtime 마운트는 루트 바인드가
+#  아니므로 정상 통과한다. privileged 나 '/:' 바인드는 규칙 불충족 → 기본 거부로 차단.)
+allow {
+  input.Method == "POST"
+  contains(input.Path, "/containers/create")
+  not privileged
+  not host_root_bind
+}
+
+privileged {
+  input.Body.HostConfig.Privileged == true
+}
+
+host_root_bind {
+  some b
+  startswith(input.Body.HostConfig.Binds[b], "/:")
+}
+REGO
+
+# 관리형 플러그인 install(비대화식 부팅이라 권한 자동 승인). 정책 파일을 가리키게 한다.
+docker plugin install ${opa_authz_plugin} \
+  opa-args="-policy-file /opa/authz.rego" \
+  --grant-all-permissions \
+  || echo "WARN: AuthZ 플러그인 install 실패. daemon.json 은 그대로 둔다."
+
+# 플러그인이 "확실히 enabled" 일 때만 데몬에 물린다. 아니면 손대지 않아 락아웃을 피한다.
+if docker plugin inspect ${opa_authz_plugin} --format '{{.Enabled}}' 2>/dev/null | grep -qx true; then
+  cat > /etc/docker/daemon.json <<DAEMON
+{
+  "log-driver": "json-file",
+  "log-opts": {
+    "max-size": "10m",
+    "max-file": "3"
+  },
+  "authorization-plugins": ["${opa_authz_plugin}"]
+}
+DAEMON
+  systemctl restart docker
+  sleep 3
+  # 반영 직후 데몬이 응답하지 않으면(정책 미로딩 등으로 authz 가 전부 deny) 롤백한다.
+  if ! docker info >/dev/null 2>&1; then
+    echo "FATAL(복구): AuthZ 반영 후 데몬 비정상 → daemon.json 롤백."
+    cat > /etc/docker/daemon.json <<'DAEMON'
+{
+  "log-driver": "json-file",
+  "log-opts": {
+    "max-size": "10m",
+    "max-file": "3"
+  }
+}
+DAEMON
+    systemctl restart docker
+  else
+    echo "AuthZ: ${opa_authz_plugin} 데몬에 반영 완료."
+  fi
+else
+  echo "WARN: AuthZ 플러그인이 enabled 가 아니다 → daemon.json 유지(락아웃 회피). user-data.log 확인."
+fi
+%{ endif ~}
 
 # ------------------------------------------------------------------
 # AWS CLI v2 (SSM 에서 Docker Hub 토큰을 읽는 용도)
