@@ -312,6 +312,9 @@ DOCDB_PASSWORD=$(aws ssm get-parameter --name "${docdb_password_param}" --with-d
   --region ${region} --query Parameter.Value --output text)
 JWT_SECRET=$(aws ssm get-parameter --name "${jwt_secret_param}" --with-decryption \
   --region ${region} --query Parameter.Value --output text)
+# 카드 저장 필드암호화 키(Base64 32B). 이미지에 굽지 않고 여기서 받아 app.env 로 넘긴다.
+CARD_STORAGE_KEY=$(aws ssm get-parameter --name "${card_storage_key_param}" --with-decryption \
+  --region ${region} --query Parameter.Value --output text)
 
 # ------------------------------------------------------------------
 # Docker Hub 로그인
@@ -427,6 +430,13 @@ SPRING_DATA_MONGODB_URI=mongodb://${docdb_username}:$DOCDB_PASSWORD@${docdb_endp
 # 값이 없으면 플레이스홀더 해석에 실패해 앱이 아예 뜨지 않는다 —
 # 공개된 로컬 테스트 키로 토큰을 서명하는 것보다 이쪽이 낫다.
 JWT_SECRET=$JWT_SECRET
+
+# --- 카드 저장 필드암호화 키 ---
+# prod yml 의 kidhack.card.storage-key 가 이 값을 플레이스홀더로 참조한다.
+# 비면 FieldEncryptionKey 가 재기동마다 난수 키를 만들어 WAS 2 대가 서로 다른 키를
+# 들게 되고, 그러면 GET /wallet/cards 가 간헐 500 이 나며 재배포 때 옛 카드가 복호
+# 불가가 된다. 그래서 이미지에 굽는 대신 SSM 에서 받아 여기로 넘긴다.
+CARD_STORAGE_KEY=$CARD_STORAGE_KEY
 
 # --- AWS SDK ---
 # S3 버킷 이름(app.s3.bucket)은 prod yml 로 갔다. 버킷을 바꾸려면

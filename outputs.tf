@@ -209,18 +209,20 @@ output "backend_prod_yml" {
     # 카드번호 저장 필드암호화 키(Base64 32 바이트). secrets.tf 의
     # random_bytes.card_storage_key 가 만들고 state 가 기억한다.
     #
-    # 여기는 $${...} 플레이스홀더가 아니라 값을 직접 렌더링한다. app.env 로
-    # 뺄 수도 있지만 그러려면 was_user_data 를 고쳐야 하고, user_data 가 바뀌면
-    # user_data_replace_on_change = true 라 WAS 2 대가 교체된다. 장애 복구
-    # 목적이라 무중단 쪽을 택했다. 대신 이 키는 이미지에 구워지므로 롤백용
-    # sha- 태그 안에도 남는다 — 이미지를 pull 할 수 있는 사람이 카드번호를
-    # 복호할 수 있다는 뜻이다. SSM 으로 빼는 것은 별건으로 남겨 둔다.
+    # 여기는 값을 직접 렌더링하지 않고 $${...} 플레이스홀더만 남긴다. 실제 값은
+    # SSM SecureString(/kidhackapp/app/card-storage-key)에 있고, WAS 부팅
+    # 스크립트가 받아 /opt/app/app.env 의 CARD_STORAGE_KEY 로 채운다(jwt.secret 과
+    # 동일 경로). 예전에는 값을 직접 구웠는데, 그러면 이미지가 롤백용 sha- 태그
+    # 안에도 남아 이미지를 pull 할 수 있는 사람이 카드번호를 복호할 수 있었다.
+    #
+    # ⚠️ user_data 가 바뀌므로 다음 apply 에서 user_data_replace_on_change = true
+    #    로 WAS 2 대가 교체된다(무중단 아님 — 배포창 필요).
     #
     # ⚠️ 들여쓰기 4 칸(= spring/server/jwt/app 과 같은 최상위)이어야 한다.
     #    6 칸으로 넣으면 app.kidhack 이 되는데, Spring 은 모르는 키를 조용히
     #    무시하므로 에러 없이 위의 "임시 키" 상태로 되돌아간다.
     kidhack:
       card:
-        storage-key: "${random_bytes.card_storage_key.base64}"
+        storage-key: "$${CARD_STORAGE_KEY}"
   YAML
 }

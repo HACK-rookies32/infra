@@ -129,7 +129,9 @@ locals {
     docdb_password_param = aws_ssm_parameter.docdb_password.name
     jwt_secret_param     = aws_ssm_parameter.jwt_secret.name
     firebase_key_param   = aws_ssm_parameter.firebase_key.name
-    was_image            = var.was_image
+    # 카드 저장 필드암호화 키. 이미지에 굽지 않고 부팅 시 app.env 로 주입한다.
+    card_storage_key_param = aws_ssm_parameter.card_storage_key.name
+    was_image              = var.was_image
 
     # WEB 과 Docker Hub 계정이 다르므로(variables.tf 주석) 자격증명도 WAS 것을 쓴다.
     # 여기서 WEB 값을 넘기면 pull 이 401 로 실패하고 systemd 가 30 초마다
