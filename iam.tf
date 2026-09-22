@@ -50,8 +50,8 @@ resource "aws_iam_role_policy_attachment" "s3_attach" {
 }
 
 # EC2 가 부팅 시 비밀 값을 SSM Parameter Store 에서 읽어가기 위한 권한.
-# WAS 는 DB 비밀번호·JWT 키·Firebase 키를, WEB 과 WAS 는 각자의 Docker Hub
-# 토큰을 읽는다(계정이 달라 토큰이 둘이다). 해당 파라미터 6 개로만 범위를 좁힌다.
+# WAS 는 DB 비밀번호·JWT 키·Firebase 키·카드 저장키를, WEB 과 WAS 는 각자의 Docker
+# Hub 토큰을 읽는다(계정이 달라 토큰이 둘이다). 해당 파라미터 7 개로만 범위를 좁힌다.
 #
 # 두 티어가 인스턴스 프로파일을 공유하므로 WEB 도 WAS 토큰을 읽을 수 있다.
 # 티어별로 역할을 나누면 더 좁힐 수 있으나, 지금은 같은 팀이 같은 이미지를
@@ -70,7 +70,8 @@ resource "aws_iam_policy" "ssm_params" {
           aws_ssm_parameter.jwt_secret.arn,
           aws_ssm_parameter.dockerhub_token.arn,
           aws_ssm_parameter.was_dockerhub_token.arn,
-          aws_ssm_parameter.firebase_key.arn
+          aws_ssm_parameter.firebase_key.arn,
+          aws_ssm_parameter.card_storage_key.arn
         ]
       },
       {

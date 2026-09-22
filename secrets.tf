@@ -95,12 +95,28 @@ resource "aws_ssm_parameter" "firebase_key" {
 #
 # random_bytes 는 한 번 만들어지면 state 에 남고 이후 apply 에서 재생성되지
 # 않는다. "키는 절대 바꾸지 않는다" 를 사람의 주의력이 아니라 도구로 강제하는
-# 것이 이 리소스의 요점이다. 값을 확인해야 하면
-# `terraform output -raw backend_prod_yml` 에 렌더링된 것을 본다.
+# 것이 이 리소스의 요점이다. 값을 확인해야 하면 아래 SSM 파라미터를 읽는다:
+# `aws ssm get-parameter --name /kidhackapp/app/card-storage-key --with-decryption`.
 #
 # ⚠️ 이 리소스를 지우거나 이름을 바꾸면 다음 apply 에서 새 키가 만들어진다.
 #    그 시점에 저장돼 있던 카드는 전부 복호 불가가 된다.
 resource "random_bytes" "card_storage_key" {
   # AES-256. FieldEncryptionKey 는 32 바이트가 아니면 기동을 거부한다.
   length = 32
+}
+
+# 위 키를 이미지에 굽지 않고 SSM 으로 뺀다(jwt_secret·firebase_key 와 같은 경로).
+#
+# 예전에는 이 값을 outputs.tf 의 backend_prod_yml 이 그대로 렌더링해 이미지(jar)에
+# 구웠고, 그러면 CD 가 남기는 sha- 롤백 태그 안에도 키가 영구히 남아 이미지를
+# pull 할 수 있는 사람이 카드번호를 복호할 수 있었다. SecureString 으로 옮겨
+# WAS 가 부팅 시에만 읽어 app.env(CARD_STORAGE_KEY)로 주입하게 한다.
+#
+# ⚠️ value 는 random_bytes 의 Base64 표현이다. FieldEncryptionKey 가
+#    Base64 로 디코드해 32 바이트인지 검증하므로 .hex 가 아니라 .base64 여야 한다.
+resource "aws_ssm_parameter" "card_storage_key" {
+  name        = "/kidhackapp/app/card-storage-key"
+  description = "Card field-encryption AES-256 key (Base64 32B) for kidhack-backend"
+  type        = "SecureString"
+  value       = random_bytes.card_storage_key.base64
 }
