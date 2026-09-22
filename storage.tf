@@ -187,3 +187,92 @@ resource "aws_s3_bucket_cors_configuration" "media" {
     max_age_seconds = 3000
   }
 }
+
+# ==========================================
+# 중요정보 공유용 프라이빗 버킷 (secure share)
+# ==========================================
+# media(사용자 첨부)와 완전히 분리된, 팀 내부 중요정보 공유 전용 비공개 버킷.
+#
+# ⚠️ 이 버킷은 ec2-role(iam.tf)에 "일부러" 연결하지 않는다.
+#   앱 인스턴스 역할은 무인증 SSRF(GET /api/community/thumbnail)로 탈취되는 바로 그
+#   롤이다(mitm_lab.tf 주석). 여기에 이 버킷 권한을 주면 중요정보가 그 체인으로
+#   그대로 샌다. 접근은 사람/별도 IAM 주체가 콘솔·CLI 로 대역 밖에서 한다.
+#   (그래서 CORS 도 없다 — 브라우저에서 직접 붙는 버킷이 아니다)
+#
+# ⚠️ media 와 달리 force_destroy = false 다. 중요정보라, 비어 있지 않으면 destroy 가
+#   BucketNotEmpty 로 "일부러" 실패한다 — 환경을 통째로 내렸다 올리는 주기(storage.tf
+#   상단 주석)에 이 버킷이 휩쓸려 지워지는 것을 막는 안전장치다. 정말 지우려면
+#   버킷을 먼저 비우거나 이 값을 true 로 바꿀 것.
+resource "aws_s3_bucket" "secure_share" {
+  bucket        = var.secure_share_bucket_name
+  force_destroy = false
+}
+
+# 퍼블릭 액세스 차단 4종 (media 와 동일. 위 media 블록 주석 참고).
+resource "aws_s3_bucket_public_access_block" "secure_share" {
+  bucket = aws_s3_bucket.secure_share.id
+
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
+}
+
+# 버저닝: 실수로 덮어쓰거나 지운 중요 파일을 되돌릴 수 있게 켠다.
+resource "aws_s3_bucket_versioning" "secure_share" {
+  bucket = aws_s3_bucket.secure_share.id
+  versioning_configuration {
+    status = "Enabled"
+  }
+}
+
+# 저장 암호화. 리포 관례대로 키 비용 없는 AES256(SSE-S3)을 쓴다.
+# ⚠️ 오브젝트 단위 접근 추적/키 접근 통제가 필요하면 SSE-KMS(고객관리키)로 올릴 것.
+#   그러면 오브젝트 접근이 CloudTrail 데이터이벤트 + KMS Decrypt 로그로 남고,
+#   키 정책으로 "누가 복호할 수 있는가"까지 통제된다(observability.tf 와 맞물린다).
+resource "aws_s3_bucket_server_side_encryption_configuration" "secure_share" {
+  bucket = aws_s3_bucket.secure_share.id
+  rule {
+    apply_server_side_encryption_by_default {
+      sse_algorithm = "AES256"
+    }
+  }
+}
+
+# 끊긴 멀티파트 업로드 조각 정리(순수 위생). 버전은 중요정보라 자동 만료하지 않는다.
+resource "aws_s3_bucket_lifecycle_configuration" "secure_share" {
+  bucket = aws_s3_bucket.secure_share.id
+
+  rule {
+    id     = "abort-incomplete-multipart-uploads"
+    status = "Enabled"
+    filter {}
+
+    abort_incomplete_multipart_upload {
+      days_after_initiation = 7
+    }
+  }
+}
+
+# 전송 암호화 강제: HTTP(비 TLS) 요청 거부 (media_tls_only 와 동일 패턴).
+# Effect=Deny 라 "퍼블릭 정책"으로 판정되지 않아 block_public_policy 와 충돌하지 않는다.
+resource "aws_s3_bucket_policy" "secure_share_tls_only" {
+  bucket = aws_s3_bucket.secure_share.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Sid       = "DenyInsecureTransport"
+      Effect    = "Deny"
+      Principal = "*"
+      Action    = "s3:*"
+      Resource = [
+        aws_s3_bucket.secure_share.arn,
+        "${aws_s3_bucket.secure_share.arn}/*"
+      ]
+      Condition = {
+        Bool = { "aws:SecureTransport" = "false" }
+      }
+    }]
+  })
+}

@@ -42,6 +42,34 @@ output "ubuntu_ami_id" {
   value       = local.ubuntu_ami
 }
 
+# ==========================================
+# 관측(observability.tf)
+# ==========================================
+output "cloudtrail_name" {
+  description = "CloudTrail trail name"
+  value       = aws_cloudtrail.main.name
+}
+
+output "cloudtrail_s3_bucket" {
+  description = "S3 bucket holding CloudTrail logs (AWSLogs/<account>/ prefix)"
+  value       = aws_s3_bucket.cloudtrail.bucket
+}
+
+output "vpc_flow_log_group" {
+  description = "CloudWatch Logs group for VPC Flow Logs"
+  value       = aws_cloudwatch_log_group.vpc_flow.name
+}
+
+output "ec2_log_groups" {
+  description = "CloudWatch Logs groups for EC2 host/container logs (streams: <tier>-<instance_id>)"
+  value       = { for k, g in aws_cloudwatch_log_group.ec2 : k => g.name }
+}
+
+output "secure_share_bucket" {
+  description = "Private bucket for sharing sensitive info (intentionally NOT attached to ec2-role)"
+  value       = aws_s3_bucket.secure_share.bucket
+}
+
 # WAS 는 개별 인스턴스가 아니라 아래 두 엔드포인트로만 접속해야 한다.
 output "docdb_cluster_endpoint" {
   description = "DocumentDB Cluster Endpoint (write). Always points to the current writer."

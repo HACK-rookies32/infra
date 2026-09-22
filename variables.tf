@@ -13,6 +13,13 @@ variable "s3_bucket_name" {
   default = "kidhackapp-media-bucket-2026"
 }
 
+# 중요정보 공유용 프라이빗 버킷 이름 (storage.tf 의 secure_share).
+# S3 버킷 이름은 전역 유일해야 하므로 충돌하면 이 값을 바꿀 것.
+variable "secure_share_bucket_name" {
+  type    = string
+  default = "kidhackapp-secure-share-2026"
+}
+
 variable "db_username" {
   type    = string
   default = "adminexample"
@@ -289,6 +296,52 @@ variable "timezone" {
 variable "ssh_key_name" {
   type    = string
   default = "kidhackapp-key"
+}
+
+# ============================================================================
+# 관측(observability.tf) — CloudTrail / CloudWatch
+# ============================================================================
+
+# CloudTrail 로그 전용 S3 버킷 이름. media 버킷과 분리한다(observability.tf 주석).
+# S3 버킷 이름은 전역 유일해야 하므로 계정마다 충돌하면 이 값을 바꿀 것.
+variable "cloudtrail_bucket_name" {
+  type    = string
+  default = "kidhackapp-cloudtrail-logs-2026"
+}
+
+# CloudTrail 로그 S3 보관 기간(일). 지나면 라이프사이클이 만료시킨다.
+variable "cloudtrail_log_retention_days" {
+  type    = number
+  default = 90
+}
+
+# VPC Flow Logs 의 CloudWatch Logs 보관 기간(일).
+# Flow Logs 는 양이 많아 짧게 잡는다. 필요하면 늘릴 것.
+variable "flow_log_retention_days" {
+  type    = number
+  default = 14
+}
+
+# EC2 호스트·컨테이너 로그의 CloudWatch Logs 보관 기간(일).
+variable "ec2_log_retention_days" {
+  type    = number
+  default = 30
+}
+
+# EC2 CloudWatch Agent 토글 (observability.tf 의 SSM 어소시에이션/파라미터).
+#
+# true(기본): SSM State Manager 가 WEB/WAS 4대에 CloudWatch Agent 를 설치·설정해
+#   호스트/컨테이너 로그와 메모리/디스크 메트릭을 CloudWatch 로 보낸다.
+# false      : SSM 파라미터/어소시에이션을 만들지 않는다. CloudTrail·VPC Flow Logs 만
+#   쓸 때. (로그그룹과 IAM 은 남는다 — 비어 있어 무해)
+#
+# ⚠️ user_data 를 건드리지 않으므로 이 값을 바꿔도 EC2 는 재생성되지 않는다
+#    (Agent 를 user_data 에 인라인하면 WAS 가 16KiB 상한을 넘겨서 SSM 으로 뺐다.
+#     observability.tf 의 섹션 C 주석 참고). authz/docker 토글과 다른 점이다.
+#    false 로 되돌려도 이미 설치된 Agent 는 다음 부팅/수동 정리 전까지 계속 돈다.
+variable "enable_cloudwatch_agent" {
+  type    = bool
+  default = true
 }
 
 # ============================================================================

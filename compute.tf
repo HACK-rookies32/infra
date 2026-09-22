@@ -184,7 +184,9 @@ resource "aws_instance" "web" {
     volume_type = local.root_volume.type
     encrypted   = local.root_volume.encrypted
   }
-  tags = { Name = "kidhackapp-web-${each.key}" }
+  # App 태그: observability.tf 의 CloudWatch Agent SSM 어소시에이션이 이 태그로
+  # 대상 인스턴스를 찾는다. 태그 추가는 in-place 라 EC2 를 재생성하지 않는다.
+  tags = { Name = "kidhackapp-web-${each.key}", App = "kidhackapp" }
 }
 
 # External ALB
@@ -339,7 +341,9 @@ resource "aws_instance" "was" {
     volume_type = local.root_volume.type
     encrypted   = local.root_volume.encrypted
   }
-  tags = { Name = "kidhackapp-was-${each.key}" }
+  # App 태그: observability.tf 의 CloudWatch Agent SSM 어소시에이션 대상 지정용
+  # (web 과 동일). 태그 추가는 in-place 라 EC2 를 재생성하지 않는다.
+  tags = { Name = "kidhackapp-was-${each.key}", App = "kidhackapp" }
 }
 
 # Internal NLB
