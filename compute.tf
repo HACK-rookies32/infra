@@ -102,6 +102,11 @@ locals {
     dockerhub_token_param    = aws_ssm_parameter.dockerhub_token.name
     watchtower_image         = var.watchtower_image
     watchtower_poll_interval = var.watchtower_poll_interval
+
+    # Docker 버전 핀(상시) + AuthZ 실습 토글. variables.tf 주석 참고.
+    docker_version   = var.docker_version
+    authz_enabled    = var.enable_docker_authz_lab
+    opa_authz_plugin = var.opa_authz_plugin
   })
 
   # WAS 도 WEB 과 같은 방식이다. S3 에서 jar 를 받지 않고 Docker Hub 이미지를
@@ -134,6 +139,11 @@ locals {
 
     watchtower_image         = var.watchtower_image
     watchtower_poll_interval = var.watchtower_poll_interval
+
+    # Docker 버전 핀(상시) + AuthZ 실습 토글. variables.tf 주석 참고.
+    docker_version   = var.docker_version
+    authz_enabled    = var.enable_docker_authz_lab
+    opa_authz_plugin = var.opa_authz_plugin
   })
 }
 
