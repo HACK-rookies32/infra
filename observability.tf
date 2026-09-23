@@ -81,15 +81,47 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "cloudtrail" {
 }
 
 # 로그 보관 기간. 감사 로그가 무한정 쌓여 요금이 새지 않게 만료시킨다.
+#
+# ⚠️ 이 버킷은 CloudTrail 로그(AWSLogs/ 접두)와 member 월간 백업(db-backup/ 접두)을
+#    함께 담는다(backup.tf 의 백업 람다가 db-backup/ 아래에 쓴다). 두 데이터는 보관
+#    기간이 다르다:
+#      - 로그   : var.cloudtrail_log_retention_days (기본 90일)
+#      - 백업   : var.member_backup_retention_days  (기본 1095일 = 3년)
+#    그래서 규칙마다 filter 로 접두를 좁힌다. 로그 규칙을 filter {}(=버킷 전체)로 두면
+#    3년 보관해야 할 백업까지 90일에 지워지므로, 반드시 접두로 분리해야 한다.
+#    (접두가 겹치면 S3 는 더 짧은 만료를 적용한다 — 겹치지 않게 나눈다.)
+#
+# S3 버킷 하나에는 aws_s3_bucket_lifecycle_configuration 을 하나만 둘 수 있다.
+# 백업용 규칙을 별도 리소스로 만들면 이 설정을 통째로 덮어쓰므로, 같은 리소스 안에
+# 규칙(rule)으로 추가한다.
 resource "aws_s3_bucket_lifecycle_configuration" "cloudtrail" {
   bucket = aws_s3_bucket.cloudtrail.id
 
+  # CloudTrail 로그(AWSLogs/<account_id>/... 로 쓰인다)만 대상으로 90일 만료.
   rule {
     id     = "expire-trail-logs"
     status = "Enabled"
-    filter {}
+    filter {
+      prefix = "AWSLogs/"
+    }
     expiration {
       days = var.cloudtrail_log_retention_days
+    }
+  }
+
+  # member 테이블 월간 백업(db-backup/ 접두)만 대상으로 3년 보관 후 만료.
+  # 백업 람다가 s3://<이 버킷>/db-backup/ 아래에 월 1회 쓴다.
+  # ⚠️ 이 버킷은 force_destroy = true 라 terraform destroy 시 3년치 백업도 함께
+  #    삭제된다(observability.tf 상단 cloudtrail 버킷 주석). 3년 보관을 실제로
+  #    보장하려면 force_destroy=false 로 바꾸거나 백업을 별도 버킷으로 뺄 것.
+  rule {
+    id     = "expire-db-backup"
+    status = "Enabled"
+    filter {
+      prefix = "db-backup/"
+    }
+    expiration {
+      days = var.member_backup_retention_days
     }
   }
 }

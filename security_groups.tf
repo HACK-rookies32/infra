@@ -167,6 +167,21 @@ resource "aws_security_group" "rds_sg" {
     protocol        = "tcp"
     security_groups = [aws_security_group.was_sg.id]
   }
+
+  # member 백업 람다(backup.tf)의 Oracle 접근. enable_member_backup=true 일 때만 붙는다.
+  # rds_sg 는 인라인 규칙을 쓰므로 standalone aws_security_group_rule 을 섞으면 규칙이
+  # 서로 덮어써진다(provider 제약). 그래서 dynamic 인라인 블록으로 추가한다.
+  dynamic "ingress" {
+    for_each = var.enable_member_backup ? [1] : []
+    content {
+      description     = "member backup lambda -> Oracle 1521"
+      from_port       = 1521
+      to_port         = 1521
+      protocol        = "tcp"
+      security_groups = [aws_security_group.member_backup_sg[0].id]
+    }
+  }
+
   egress {
     from_port   = 0
     to_port     = 0

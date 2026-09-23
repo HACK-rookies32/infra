@@ -315,6 +315,14 @@ variable "cloudtrail_log_retention_days" {
   default = 90
 }
 
+# member 테이블 월간 백업(cloudtrail 버킷의 db-backup/ 접두) 보관 기간(일).
+# 기본 1095일 = 약 3년(365*3). 윤년까지 정확히 3년을 채우려면 1096 으로 둘 것.
+# observability.tf 의 expire-db-backup 라이프사이클 규칙이 이 값을 쓴다.
+variable "member_backup_retention_days" {
+  type    = number
+  default = 1095
+}
+
 # VPC Flow Logs 의 CloudWatch Logs 보관 기간(일).
 # Flow Logs 는 양이 많아 짧게 잡는다. 필요하면 늘릴 것.
 variable "flow_log_retention_days" {
@@ -345,46 +353,42 @@ variable "enable_cloudwatch_agent" {
 }
 
 # ============================================================================
-# [모의해킹 실습] ELB confused-deputy MITM 랩 (mitm_lab.tf) 변수
-#   토글 기반. 기본 OFF(미생성). ON 하려면 팀이 핸들러 zip / 노드 AMI 를 함께
-#   제공해야 한다(각각 precondition 으로 강제). 랩 성격·체인·범위는 mitm_lab.tf
-#   상단 주석 참고.
+# member 테이블 월간 백업 Lambda (backup.tf)
+#   RDS Oracle 의 member 테이블을 월 1회 S3(cloudtrail 버킷 db-backup/)로 백업한다.
+#   ⚠️ 운영 기능이다(공격 랩 아님). 실행롤은 최소 권한이고, SSRF 로 탈취되는
+#      ec2_role(iam.tf)에는 이 Lambda 를 수정/호출할 권한을 일부러 주지 않는다.
 # ============================================================================
 
-variable "enable_mitm_lab" {
-  description = "ELB confused-deputy MITM 랩(§A Lambda/IAM + §B 수신노드/SG) 생성 토글. false 면 아무것도 생성하지 않음."
+variable "enable_member_backup" {
+  description = "member 월간 백업 Lambda(함수/실행롤/SG/EventBridge) 생성 토글. false 면 아무것도 생성하지 않음."
   type        = bool
   default     = false
 }
 
-variable "deputy_zip_path" {
-  description = "kidhack-elb-deputy Lambda 핸들러 zip 경로(팀 제공). enable_mitm_lab=true 면 필수(mitm_lab.tf precondition)."
+variable "member_backup_zip_path" {
+  description = "member 백업 Lambda 핸들러 zip 경로(팀 제공). enable_member_backup=true 면 필수(backup.tf precondition)."
   type        = string
   default     = ""
 }
 
-variable "deputy_handler" {
-  description = "Lambda 핸들러 진입점(런타임 언어에 맞출 것)."
+variable "member_backup_handler" {
+  description = "백업 Lambda 핸들러 진입점(런타임 언어에 맞출 것)."
   type        = string
   default     = "index.handler"
 }
 
-variable "deputy_runtime" {
-  description = "Lambda 런타임."
+variable "member_backup_runtime" {
+  description = "백업 Lambda 런타임. Oracle 접속은 python-oracledb thin 모드면 Instant Client 불필요."
   type        = string
   default     = "python3.12"
 }
 
-variable "mitm_node_ami" {
-  description = "MITM 수신 노드 AMI(팀 제공 역프록시 이미지, 기존 플릿과 아키텍처 일치). enable_mitm_lab=true 면 필수(mitm_lab.tf precondition)."
+# EventBridge 스케줄. 기본 cron(0 0 1 * ? *) = UTC 00:00 매월 1일 = KST 09:00 1일.
+# UTC 로 잡되 KST 09:00 이라 날짜(1일)가 두 타임존에서 어긋나지 않는다.
+variable "member_backup_schedule" {
+  description = "백업 트리거 EventBridge 스케줄 식. 기본: 매월 1일 KST 09:00."
   type        = string
-  default     = ""
-}
-
-variable "mitm_node_instance_type" {
-  description = "MITM 수신 노드 인스턴스 타입."
-  type        = string
-  default     = "t3.small"
+  default     = "cron(0 0 1 * ? *)"
 }
 
 # ============================================================================
