@@ -195,7 +195,7 @@ resource "aws_s3_bucket_cors_configuration" "media" {
 #
 # ⚠️ 이 버킷은 ec2-role(iam.tf)에 "일부러" 연결하지 않는다.
 #   앱 인스턴스 역할은 무인증 SSRF(GET /api/community/thumbnail)로 탈취되는 바로 그
-#   롤이다(mitm_lab.tf 주석). 여기에 이 버킷 권한을 주면 중요정보가 그 체인으로
+#   롤이다(compute.tf 의 IMDSv1/SSRF 주석 참고). 여기에 이 버킷 권한을 주면 중요정보가 그 체인으로
 #   그대로 샌다. 접근은 사람/별도 IAM 주체가 콘솔·CLI 로 대역 밖에서 한다.
 #   (그래서 CORS 도 없다 — 브라우저에서 직접 붙는 버킷이 아니다)
 #

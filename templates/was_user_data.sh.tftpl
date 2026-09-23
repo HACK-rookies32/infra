@@ -164,8 +164,11 @@ systemctl restart docker
 %{ if authz_enabled ~}
 # ==================================================================
 # [모의해킹 실습] Docker AuthZ 플러그인 (OPA) — enable_docker_authz_lab=true 일 때만 렌더링
-# 데몬 API 에 닿는 통로는 Watchtower 소켓 마운트뿐(앱 컨테이너는 소켓 안 뭄) = 사실상 root.
-# AuthZ 플러그인이 그 API 호출을 Rego 정책으로 allow/deny 한다.
+# 데몬 API 에 닿는 통로는 소켓 마운트다(= 사실상 root). 이 랩에서는 Watchtower 뿐 아니라
+# 앱 컨테이너(kidhack)에도 /var/run/docker.sock 을 일부러 물린다(authz_enabled 일 때만).
+# 8080 으로 외부에 노출된 앱을 통해 소켓에 닿는 경로를 의도적으로 열어 공격면을 만들고,
+# 그 API 호출을 아래 AuthZ 플러그인이 Rego 정책으로 allow/deny 해 privileged/호스트 루트
+# 바인드 같은 '호스트 장악' 경로만 기본 거부로 막는다(우회는 CVE-2026-34040 패딩뿐).
 #
 # ⚠️ 순서(락아웃 방지): install/enable → "확실히 enabled 일 때만" daemon.json 배선 → restart.
 #    반영 후 데몬 비정상이면(정책 미로딩 등) daemon.json 을 자동 롤백한다.
@@ -228,24 +231,57 @@ allow {
   contains(input.Path, "/containers/")
 }
 
-# 컨테이너 '생성'은 본문이 안전할 때만 허용 — 여기가 CVE 우회 지점이다.
-# privileged 도 아니고 호스트 루트('/') 바인드도 없을 때만 통과.
-# (Watchtower 의 /var/run/docker.sock, 앱의 firebase/localtime 마운트는 루트 바인드가
-#  아니므로 정상 통과한다. privileged 나 '/:' 바인드는 규칙 불충족 → 기본 거부로 차단.)
+# 컨테이너 '생성' — 여기가 CVE-2026-34040 우회 지점이다(의도적으로 열어 둔다).
+#
+# 구조: "위험 패턴이 하나도 없으면 허용"(denylist). 정상 컨테이너가 절대 안 쓰는
+# 호스트 장악용 필드를 dangerous_create 로 열거하고, 바인드/마운트 소스는 이 fleet 이
+# 실제로 쓰는 경로만 allowed_source 허용목록으로 둔다. 목록 밖이면 위험 → 기본 거부.
+# (예전엔 privileged 와 '/:' 루트 바인드 두 가지만 봐서 나머지 escalation 경로 — 추가
+#  capability·호스트 네임스페이스·devices·임의 호스트 경로 바인드 — 가 전부 무방비였다.
+#  이제 진짜 본문을 보내는 평범한 남용은 아래 열거·허용목록이 다 잡는다.)
+#
+# ⚠️ CVE 시연 포인트(이 랩의 목적): 이 규칙은 본문을 '보고' 판정한다. 본문이 비어 있으면
+#    (Docker 29.3.0 이 1MB 초과 본문을 플러그인에 닿기 전에 버려 플러그인 눈엔 빈 본문)
+#    dangerous_create 의 어느 절도 참조 필드가 없어 걸리지 않는다 → not dangerous_create=true
+#    → 통과. 데몬은 그 뒤 실제(패딩된) 본문대로 privileged 컨테이너를 만든다 = 우회.
+#    이 통과를 '유일한 우회로'로 남기는 게 시연 목적이다. 닫으려면 이 allow 에 positive 게이트
+#    (예: known_image — 알려진 이미지일 때만 통과)를 한 줄 얹으면 빈 본문이 Image 부재로 탈락한다.
 allow {
   input.Method == "POST"
   contains(input.Path, "/containers/create")
-  not privileged
-  not host_root_bind
+  not dangerous_create
 }
 
-privileged {
-  input.Body.HostConfig.Privileged == true
-}
+# 정상 컨테이너가 안 쓰는 구조 필드 = 있으면 무조건 위험.
+# (필드 부재 시 count/비교가 undefined 라 절이 안 걸린다 = 정상 컨테이너는 통과.)
+dangerous_create { input.Body.HostConfig.Privileged == true }
+dangerous_create { input.Body.HostConfig.CapAdd[_] }
+dangerous_create { input.Body.HostConfig.PidMode     == "host" }
+dangerous_create { input.Body.HostConfig.NetworkMode == "host" }
+dangerous_create { input.Body.HostConfig.IpcMode     == "host" }
+dangerous_create { startswith(input.Body.HostConfig.UsernsMode, "host") }
+dangerous_create { input.Body.HostConfig.Devices[_] }
+dangerous_create { input.Body.HostConfig.SecurityOpt[_] }
 
-host_root_bind {
+# 바인드/마운트: 이 fleet 이 실제로 쓰는 소스만 허용, 그 밖이면 위험.
+#   /opt/app/...          앱 firebase.json 등
+#   /etc/localtime        타임존
+#   /var/run/docker.sock  Watchtower + (랩) 앱 컨테이너
+#   /root/.docker         Watchtower 레지스트리 자격
+dangerous_create {
   some b
-  startswith(input.Body.HostConfig.Binds[b], "/:")
+  not allowed_source(input.Body.HostConfig.Binds[b])
+}
+dangerous_create {
+  some m
+  mnt := input.Body.HostConfig.Mounts[m]
+  mnt.Type == "bind"
+  not allowed_source(mnt.Source)
+}
+
+allowed_source(src) {
+  prefixes := ["/opt/app/", "/etc/localtime", "/var/run/docker.sock", "/root/.docker"]
+  startswith(src, prefixes[_])
 }
 REGO
 
@@ -508,6 +544,9 @@ ExecStart=/usr/bin/docker run -d \\
   -v /opt/app/firebase.json:/run/secrets/firebase.json:ro \\
   -e TZ=${timezone} \\
   -v /etc/localtime:/etc/localtime:ro \\
+%{ if authz_enabled ~}
+  -v /var/run/docker.sock:/var/run/docker.sock \\
+%{ endif ~}
   -l com.centurylinklabs.watchtower.enable=true \\
   ${was_image}:latest
 Restart=on-failure

@@ -99,7 +99,8 @@ resource "aws_elasticache_replication_group" "redis" {
   at_rest_encryption_enabled = true
   transit_encryption_enabled = true
 
-  # 일 단위 스냅샷. destroy 시 최종 스냅샷도 남긴다.
+  # 일 단위 스냅샷. destroy 시 최종 스냅샷은 var.keep_final_snapshot=true 일 때만
+  # 남긴다(기본 false → 미생성). 정기 스냅샷은 snapshot_retention_limit(5)로 별도 유지.
   # snapshot_window 는 maintenance_window 와 겹치면 안 됨 (UTC 기준).
   snapshot_retention_limit  = 5
   snapshot_window           = "19:00-20:00"         # KST 04:00-05:00

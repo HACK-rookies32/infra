@@ -81,15 +81,47 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "cloudtrail" {
 }
 
 # 로그 보관 기간. 감사 로그가 무한정 쌓여 요금이 새지 않게 만료시킨다.
+#
+# ⚠️ 이 버킷은 CloudTrail 로그(AWSLogs/ 접두)와 member 월간 백업(db-backup/ 접두)을
+#    함께 담는다(backup.tf 의 백업 람다가 db-backup/ 아래에 쓴다). 두 데이터는 보관
+#    기간이 다르다:
+#      - 로그   : var.cloudtrail_log_retention_days (기본 90일)
+#      - 백업   : var.member_backup_retention_days  (기본 1095일 = 3년)
+#    그래서 규칙마다 filter 로 접두를 좁힌다. 로그 규칙을 filter {}(=버킷 전체)로 두면
+#    3년 보관해야 할 백업까지 90일에 지워지므로, 반드시 접두로 분리해야 한다.
+#    (접두가 겹치면 S3 는 더 짧은 만료를 적용한다 — 겹치지 않게 나눈다.)
+#
+# S3 버킷 하나에는 aws_s3_bucket_lifecycle_configuration 을 하나만 둘 수 있다.
+# 백업용 규칙을 별도 리소스로 만들면 이 설정을 통째로 덮어쓰므로, 같은 리소스 안에
+# 규칙(rule)으로 추가한다.
 resource "aws_s3_bucket_lifecycle_configuration" "cloudtrail" {
   bucket = aws_s3_bucket.cloudtrail.id
 
+  # CloudTrail 로그(AWSLogs/<account_id>/... 로 쓰인다)만 대상으로 90일 만료.
   rule {
     id     = "expire-trail-logs"
     status = "Enabled"
-    filter {}
+    filter {
+      prefix = "AWSLogs/"
+    }
     expiration {
       days = var.cloudtrail_log_retention_days
+    }
+  }
+
+  # member 테이블 월간 백업(db-backup/ 접두)만 대상으로 3년 보관 후 만료.
+  # 백업 람다가 s3://<이 버킷>/db-backup/ 아래에 월 1회 쓴다.
+  # ⚠️ 이 버킷은 force_destroy = true 라 terraform destroy 시 3년치 백업도 함께
+  #    삭제된다(observability.tf 상단 cloudtrail 버킷 주석). 3년 보관을 실제로
+  #    보장하려면 force_destroy=false 로 바꾸거나 백업을 별도 버킷으로 뺄 것.
+  rule {
+    id     = "expire-db-backup"
+    status = "Enabled"
+    filter {
+      prefix = "db-backup/"
+    }
+    expiration {
+      days = var.member_backup_retention_days
     }
   }
 }
@@ -377,7 +409,7 @@ resource "aws_ssm_association" "cw_agent_configure" {
 # ⚠️ 관리형 CloudWatchAgentServerPolicy 를 일부러 쓰지 않는다.
 #   그 정책은 logs:* 를 리소스 "*" 로 열고 ssm:GetParameter 까지 "*" 로 준다.
 #   이 ec2_role 은 SSRF(무인증 GET /api/community/thumbnail)로 자격이 탈취되는
-#   바로 그 롤이다(mitm_lab.tf 주석). 관리형을 붙이면 탈취 자격의 사정거리가
+#   바로 그 롤이다(compute.tf 의 IMDSv1/SSRF 주석 참고). 관리형을 붙이면 탈취 자격의 사정거리가
 #   "임의 로그그룹 조작 + 임의 SSM 파라미터 열람"까지 넓어진다.
 #
 #   그래서 딱 필요한 범위로 손수 좁힌다:
@@ -389,6 +421,10 @@ resource "aws_ssm_association" "cw_agent_configure" {
 #                       아니라 로그그룹 이름뿐이라, 탈취 자격에 새어도 피해가 없다.
 #   그래도 탈취 자격이 "우리 로그그룹에 가짜 로그를 넣어 증거를 흐리는" 정도는
 #   가능해진다 — 로깅을 붙이며 감수하는 최소 확장이며, 관리형보다 훨씬 좁다.
+#
+#   ⚠️ 단, 이 정책과 별개로 ec2_role 은 lambda:UpdateFunctionCode+InvokeFunction 을
+#   Resource="*" 로 갖고 있어(iam.tf 의 lambda_deploy), 탈취 자격의 실제 사정거리는
+#   위에서 좁힌 범위보다 훨씬 넓다.
 resource "aws_iam_policy" "cloudwatch_agent" {
   name = "kidhackapp-cloudwatch-agent-policy"
   policy = jsonencode({
