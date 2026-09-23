@@ -355,8 +355,11 @@ variable "enable_cloudwatch_agent" {
 # ============================================================================
 # member 테이블 월간 백업 Lambda (backup.tf)
 #   RDS Oracle 의 member 테이블을 월 1회 S3(cloudtrail 버킷 db-backup/)로 백업한다.
-#   ⚠️ 운영 기능이다(공격 랩 아님). 실행롤은 최소 권한이고, SSRF 로 탈취되는
-#      ec2_role(iam.tf)에는 이 Lambda 를 수정/호출할 권한을 일부러 주지 않는다.
+#   ⚠️ 운영 기능이다(공격 랩 아님). 실행롤(member_backup_exec)은 최소 권한이다.
+#      단, ec2_role(iam.tf)에 lambda:UpdateFunctionCode + InvokeFunction 을
+#      Resource="*" 로 부여해 뒀다 — SSRF 로 이 롤이 탈취되면 백업 Lambda 코드를
+#      교체·호출해 실행롤 권한(DB·SSM 비밀·백업버킷)으로 임의 코드를 돌릴 수 있는
+#      권한 상승 경로가 열려 있다(iam.tf 의 lambda_deploy 정책).
 # ============================================================================
 
 variable "enable_member_backup" {
@@ -402,7 +405,7 @@ variable "member_backup_schedule" {
 #   "소켓 = 사실상 root" 다. AuthZ 플러그인은 그 데몬 API 호출을 Rego 정책으로
 #   allow/deny 한다. 실습 대상은 이 소켓 노출과 그 위의 게이팅이다.
 #
-#   경계(mitm_lab 과 동일 철학): 인프라는 골격(버전 핀·플러그인 설치·daemon.json
+#   경계(모의해킹 랩 공통 철학): 인프라는 골격(버전 핀·플러그인 설치·daemon.json
 #   배선·기본 거부(default deny) + Watchtower CI/CD 허용 베이스라인 정책)만 제공한다.
 #   privileged/호스트 루트 마운트 차단은 이 베이스라인에 이미 들어 있으나, 플러그인
 #   버전별 input 스키마(Method/Path/Body)·정책 경로 확정은 팀 몫이다 — 어긋나면 규칙이

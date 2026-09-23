@@ -2,7 +2,9 @@
 # member 테이블 월간 백업 (운영 기능)
 # ----------------------------------------------------------------------------
 # RDS Oracle 의 member 테이블을 월 1회 S3 로 백업한다.
-#   - 트리거 : EventBridge 스케줄(기본 매월 1일 KST 09:00). 사람이/외부가 호출하지 않는다.
+#   - 트리거 : EventBridge 스케줄(기본 매월 1일 KST 09:00). 정상 운영에선 이 스케줄만
+#              호출한다. 단 ec2_role(iam.tf)이 lambda:InvokeFunction 을 가져
+#              EC2/탈취 자격이 수동 호출도 할 수 있다(iam.tf 의 lambda_deploy 정책).
 #   - 출력   : s3://<cloudtrail 버킷>/db-backup/  (observability.tf 의 expire-db-backup
 #              라이프사이클이 3년 보관 후 만료. 로그는 AWSLogs/ 로 분리돼 서로 안 겹침)
 #   - 접속   : VPC 부착 람다 → was_private 서브넷(NAT 경유) → rds_sg 1521.
@@ -171,7 +173,9 @@ resource "aws_cloudwatch_event_target" "member_backup" {
   arn       = aws_lambda_function.member_backup[0].arn
 }
 
-# EventBridge 규칙만 이 람다를 부를 수 있게 한다(source_arn 으로 규칙 한정).
+# 리소스 기반 정책: events.amazonaws.com 이 이 규칙(source_arn)으로만 호출하게 한정한다.
+# 단 같은 계정의 IAM 아이덴티티는 리소스 정책 없이도 호출할 수 있어, lambda:InvokeFunction
+# 을 가진 ec2_role(iam.tf 의 lambda_deploy)도 이 람다를 부를 수 있다.
 resource "aws_lambda_permission" "member_backup_events" {
   count         = local.member_backup_count
   statement_id  = "AllowExecutionFromEventBridge"

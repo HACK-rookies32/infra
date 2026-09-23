@@ -409,7 +409,7 @@ resource "aws_ssm_association" "cw_agent_configure" {
 # ⚠️ 관리형 CloudWatchAgentServerPolicy 를 일부러 쓰지 않는다.
 #   그 정책은 logs:* 를 리소스 "*" 로 열고 ssm:GetParameter 까지 "*" 로 준다.
 #   이 ec2_role 은 SSRF(무인증 GET /api/community/thumbnail)로 자격이 탈취되는
-#   바로 그 롤이다(mitm_lab.tf 주석). 관리형을 붙이면 탈취 자격의 사정거리가
+#   바로 그 롤이다(compute.tf 의 IMDSv1/SSRF 주석 참고). 관리형을 붙이면 탈취 자격의 사정거리가
 #   "임의 로그그룹 조작 + 임의 SSM 파라미터 열람"까지 넓어진다.
 #
 #   그래서 딱 필요한 범위로 손수 좁힌다:
@@ -421,6 +421,10 @@ resource "aws_ssm_association" "cw_agent_configure" {
 #                       아니라 로그그룹 이름뿐이라, 탈취 자격에 새어도 피해가 없다.
 #   그래도 탈취 자격이 "우리 로그그룹에 가짜 로그를 넣어 증거를 흐리는" 정도는
 #   가능해진다 — 로깅을 붙이며 감수하는 최소 확장이며, 관리형보다 훨씬 좁다.
+#
+#   ⚠️ 단, 이 정책과 별개로 ec2_role 은 lambda:UpdateFunctionCode+InvokeFunction 을
+#   Resource="*" 로 갖고 있어(iam.tf 의 lambda_deploy), 탈취 자격의 실제 사정거리는
+#   위에서 좁힌 범위보다 훨씬 넓다.
 resource "aws_iam_policy" "cloudwatch_agent" {
   name = "kidhackapp-cloudwatch-agent-policy"
   policy = jsonencode({

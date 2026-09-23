@@ -1,5 +1,5 @@
 # ==========================================
-# 3. IAM Role (SSM + S3)
+# 3. IAM Role (SSM + S3 + Lambda)
 # ==========================================
 
 resource "aws_iam_role" "ec2_role" {
@@ -97,9 +97,10 @@ resource "aws_iam_role_policy_attachment" "ssm_params_attach" {
 # EC2 인스턴스가 Lambda 코드를 갱신(UpdateFunctionCode)·호출(InvokeFunction)
 # 할 수 있게 한다.
 #
-# ⚠️ 이 정책은 backup.tf:167 의 통제("ec2_role 에는 member_backup 의
-# InvokeFunction 을 주지 않는다 — 트리거는 오직 EventBridge")를 사용자 요청에
-# 따라 의도적으로 해제한다. WEB/WAS 가 공유하는 이 역할이 침해되면
+# ⚠️ 이 정책은 원래 설계된 통제("SSRF 로 탈취되는 ec2_role 에는 member 백업 Lambda 의
+# 수정/호출 권한을 주지 않는다 — 트리거는 오직 EventBridge")를 사용자 요청에 따라
+# 의도적으로 해제한다(backup.tf / variables.tf 의 member 백업 블록 참고).
+# WEB/WAS 가 공유하는 이 역할이 침해되면
 # member_backup(별도 실행역할 member_backup_exec 로 DB·SSM 비밀·백업버킷에
 # 접근) 의 코드를 공격자 코드로 교체한 뒤 호출해 그 역할 권한으로 임의 코드를
 # 실행할 수 있는 권한 상승 경로가 생긴다. Resource = "*" 라 계정 내 모든
